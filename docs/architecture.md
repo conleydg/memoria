@@ -36,10 +36,10 @@ flowchart TD
 
 | Component | What it does |
 |---|---|
-| **Photos Library** | Source of truth. Read-only access to the original files plus `Photos.sqlite` metadata (dates, named people, existing keywords). Never written to. |
+| **Photos Library** | Source of truth. Read-only access to the original files plus `Photos.sqlite` metadata — dates, existing keywords, and Apple's own on-device face clustering (`ZPERSON`/`ZDETECTEDFACE`). Named clusters flow straight into the index; unnamed ones are best named in Photos.app itself using Apple's native People UI, not rebuilt here (see [ADR-0015](adr/0015-people-via-photos-native-clustering.md)). Never written to. |
 | **Keyframe extraction** | Scene-change detection (FFmpeg or PySceneDetect) picks one representative frame per video shot. Images skip this step entirely. |
 | **Qwen3-VL (MLX)** | 30B-A3B mixture-of-experts vision-language model, ~18GB resident at 4-bit quant. Generates tags and free-text captions per image/keyframe. |
-| **SigLIP2** | Cross-modal embedding model. Turns each image/keyframe into a vector for meaning-based search. The same embedding also gives a near-free zero-shot screenshot/document flag (compare against label prompts like "screenshot," no extra model). |
+| **SigLIP2** | Cross-modal embedding model. Turns each image/keyframe into a vector for meaning-based search. The same embedding also gives a near-free zero-shot screenshot/document flag (compare against label prompts like "screenshot," no extra model), and powers few-shot pet identification — matching against a handful of user-labeled reference photos per pet, since no mature dedicated pet-ID model exists yet (see [ADR-0016](adr/0016-pet-identification-few-shot-siglip2.md)). Lower confidence than person recognition; suggestion-only. |
 | **Expression scorer** | A cheap classical face-expression model (py-feat/DeepFace-style), run per detected face, scoring smile intensity and visible happiness. Reliable for this one recurring axis — not for open-ended traits like "silly" (see VLM pairwise judge). |
 | **Quality scorer** | Sharpness/exposure scoring plus Q-Align for aesthetic and video quality. For video, also folds in a cheap activity signal (motion variance, scene-change count, transcript density) as a candidate "might be boring" flag — never a verdict on its own. |
 | **Duplicate grouper** | Perceptual hashing clusters near-identical shots taken in succession. Surfaces a *suggested* best-in-group; picking and deleting stays manual. |
