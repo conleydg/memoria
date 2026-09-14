@@ -1,5 +1,7 @@
 # Architecture
 
+> A styled, interactive version of this diagram is also in this repo: [`architecture.html`](architecture.html) — open it directly in a browser, or enable GitHub Pages on this repo to view it hosted.
+
 Two phases share one store. An offline pipeline indexes the library once per photo, keyframe, or video, entirely on-device. A runtime agent answers natural-language queries by calling back into that same index.
 
 ```mermaid
