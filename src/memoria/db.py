@@ -51,7 +51,9 @@ CREATE TABLE IF NOT EXISTS captions (
 
 CREATE TABLE IF NOT EXISTS embeddings (
     asset_id TEXT PRIMARY KEY REFERENCES assets(uuid),
-    vector BLOB NOT NULL,                      -- sqlite-vec vector column, once the extension is wired in
+    vector BLOB NOT NULL,                      -- packed float32 bytes (numpy .tobytes()); similarity
+                                                -- computed brute-force in application code, not a sqlite-vec
+                                                -- vec0 index - see ADR-0022 for why, and the escape hatch
     model_version TEXT NOT NULL,
     computed_at REAL NOT NULL
 );

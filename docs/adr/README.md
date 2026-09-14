@@ -25,3 +25,4 @@ Each file records one decision: the context that motivated it, what was decided,
 | [0019](0019-model-upgrade-policy.md) | Model upgrades trigger a deliberate full re-index | Accepted |
 | [0020](0020-index-backup.md) | Back up the index file via the existing external-drive process | Accepted |
 | [0021](0021-model-licensing-check.md) | Model licensing check — Q-Align is non-commercial only | Accepted |
+| [0022](0022-brute-force-vector-search-first.md) | Brute-force vector search first, sqlite-vec's `vec0` deferred | Accepted |
