@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Data / models — never commit library data, model weights, or the index
+*.sqlite
+*.sqlite3
+*.db
+/data/
+/models/
+*.mlpackage
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
