@@ -30,6 +30,16 @@ Short version: an offline indexing pipeline runs several small, specialized loca
 
 This is designed to be the first of what's meant to become several local **connectors** into a broader personal-AI system — email and text messages are named future candidates. The agent and store are kept generically shaped on purpose. **Only the photos/video connector is being built right now** — see [ADR-0012](docs/adr/0012-connector-architecture-photos-first.md).
 
+## Development
+
+The schema and asset-lifecycle logic (`src/memoria/`) don't depend on the target hardware or any AI model, so they're built and tested now, ahead of the rest — see [`docs/adr/0017`](docs/adr/0017-require-full-local-originals.md) through [`0020`](docs/adr/0020-index-backup.md) for why these were the first pieces worth writing.
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest -v
+```
+
 ## Status
 
 Design phase as of September 2026. The target hardware (a Mac Studio, 64GB unified memory) hasn't arrived yet, so this repo currently holds research and architecture decisions, not code — deliberately: the design process is part of what this project is meant to demonstrate.
