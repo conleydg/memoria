@@ -15,6 +15,13 @@ Two separate eval tracks:
 
 A small custom harness will be built rather than adopting a heavy existing framework.
 
+**Two further tracks, added after an initial gap review found the original two insufficient:**
+
+- **Subjective-judgment eval:** the VLM pairwise judge (ADR-0007) has no measurement plan of its own. Sample a set of pairwise comparisons the judge makes (e.g. "which is funnier"), get a human pairwise call on the same pairs, and track agreement rate — the same pairwise-only discipline used everywhere else in this project, applied to evaluating the judge itself.
+- **Agent-behavior eval:** distinct from whether retrieved results are good — does the agent (ADR-0005) call tools in a sensible order, avoid inventing photo IDs that don't exist, and recognize when it doesn't have enough information to answer rather than guessing? Track this via a small set of scripted multi-step queries with known-correct tool-call sequences, checked against what the agent actually calls.
+
+Expression scorer accuracy (ADR-0007) on this specific library is treated as a spot-check against the ranking eval's hand-picked groups, not a separate track — reuse the same ~50-100 sampled groups rather than building a third dataset.
+
 ## Consequences
 
 - Ground truth costs a few hours of manual review, not weeks of labeling.

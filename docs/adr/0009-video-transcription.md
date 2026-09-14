@@ -15,6 +15,11 @@ Run Whisper (MLX Whisper or whisper.cpp, both fully local) once per video's audi
 - Enables a genuinely new search capability ("find the video where dad tells the story about...") rather than a nicer version of something Photos already does.
 - Feeds a second use: transcript presence/density becomes an input to the Quality scorer's video "activity" signal (ADR-0007-adjacent — distinguishing a quiet, meaningful moment from an actually static/boring clip).
 - Adds a second model family (separate from the Qwen3/SigLIP2 lineage) to the serving story, though a small one (~1.5GB) relative to Qwen3-VL.
+- **Privacy consequence, not deferred:** this stores, in plaintext, the speech of everyone who talks in these videos — not just the library owner. ADR-0012 raises "other people's words" as a concern to resolve *before* building a future email/text connector; transcription already has that same property today. No mitigation is designed yet (e.g. redaction, retention limits, or excluding videos with non-family voices) — this is a known, unresolved gap, not something to treat as covered by the general no-cloud requirement.
+
+## Follow-up
+
+The privacy consequence above needs an actual answer before this ships — at minimum, a decision on whether transcripts get the same "fully local, suggestion-only" treatment as everything else is sufficient, or whether something further (e.g. a way to exclude or redact specific videos/speakers) is needed.
 
 ## Alternatives considered
 

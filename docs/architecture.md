@@ -70,6 +70,13 @@ See [ADR-0013](adr/0013-operational-model-two-loops.md).
 
 Cross-connector relationship queries ("photos of people mentioned in this email thread") are a real future need, but a dedicated graph database solves a scale problem this project doesn't have — a personal archive is thousands of entities, not billions. Relationships are modeled as a plain edges table in the same SQLite store; an embedded graph engine (e.g. Kuzu) is the escape hatch if that ever genuinely proves insufficient, not a server-based graph database. See [ADR-0011](adr/0011-no-graph-database.md).
 
+## Open questions
+
+Things that are genuinely unresolved, not decisions dressed up as questions — tracked here rather than as ADRs because there's no decision to record yet, only something to measure or design once real building starts.
+
+- **Compute-time budget.** No one has measured how long a full first pass over ~150K photos + ~500GB of video will actually take on the Mac Studio. This matters for whether the watcher/batch-job model (ADR-0013) needs any prioritization or chunking of the initial backlog versus just running to completion.
+- **UI.** Nothing has been designed yet — not even sketched — beyond a passing reference to reusing the prior dedup project's dashboard pattern. This is the single largest undesigned piece of the whole system; tracked in the README roadmap, deliberately left until the rest of the pipeline exists to build a UI on top of.
+
 ## Decision record
 
-Every non-obvious choice above has a corresponding ADR in [adr/](adr/), including the alternatives considered and why they were passed over.
+Every non-obvious choice above has a corresponding ADR in [adr/](adr/) (start with the [index](adr/README.md)), including the alternatives considered and why they were passed over.
