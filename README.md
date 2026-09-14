@@ -42,12 +42,13 @@ pytest -v
 
 ## Status
 
-Design phase as of September 2026. The target hardware (a Mac Studio, 64GB unified memory) hasn't arrived yet, so this repo currently holds research and architecture decisions, not code — deliberately: the design process is part of what this project is meant to demonstrate.
+The target hardware (a Mac Studio, 64GB unified memory) hasn't arrived yet, so the AI-dependent pieces (tagging, embedding, transcription) are still design-only. The pieces that don't need it — schema, asset-lifecycle detection — are built and tested now rather than waiting.
 
 - [x] Research: local model landscape, eval methodology, open-source prior art
 - [x] Architecture design
+- [x] Schema + asset-lifecycle logic (`src/memoria/`, 18 tests)
 - [ ] Eval harness
-- [ ] Indexing pipeline
+- [ ] Indexing pipeline (the AI-model side — needs the Mac Studio)
 - [ ] Agent / query layer
 - [ ] UI
 
