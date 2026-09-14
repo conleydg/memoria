@@ -18,7 +18,7 @@ That's not a search problem alone — it's search *plus* ranking *plus*, sometim
 - **Suggestions, not actions.** Every score, group, or ranking this system produces is a suggestion surfaced for review. Nothing here writes back to Apple Photos or deletes a file — that stays manual, always.
 - **Originals must be fully local.** "Optimize Mac Storage" must be off for the library being indexed — see [ADR-0017](docs/adr/0017-require-full-local-originals.md).
 
-See [docs/adr/](docs/adr/) for the reasoning behind every non-obvious decision below.
+See [docs/adr/](docs/adr/) for the reasoning behind every non-obvious decision below, and [docs/how-ai-was-used.md](docs/how-ai-was-used.md) for an honest account of the AI-assisted process that produced this repo — including where it hasn't been tested yet.
 
 ## How it works
 
