@@ -3,7 +3,9 @@ name = "memoria"
 version = "0.0.0"
 description = "Local, private, AI-powered semantic search over your own photo and video library."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "numpy>=1.26",  # brute-force vector similarity (ADR-0022) - no other use yet
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
