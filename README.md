@@ -46,10 +46,11 @@ The target hardware (a Mac Studio, 64GB unified memory) hasn't arrived yet, so t
 
 - [x] Research: local model landscape, eval methodology, open-source prior art
 - [x] Architecture design
-- [x] Schema + asset-lifecycle logic (`src/memoria/`, 18 tests)
+- [x] Schema + asset-lifecycle logic
+- [x] Hybrid search (RRF) layer, tested against synthetic data (`src/memoria/`, 36 tests)
 - [ ] Eval harness
 - [ ] Indexing pipeline (the AI-model side — needs the Mac Studio)
-- [ ] Agent / query layer
+- [ ] Agent / query layer (the search logic exists; the tool-calling loop around it doesn't yet)
 - [ ] UI
 
 ## License
