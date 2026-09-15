@@ -38,12 +38,25 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[st
 
 
 def vector_search(
-    conn, query_vector: np.ndarray, candidate_ids: list[str] | None = None, limit: int = 50
+    conn,
+    query_vector: np.ndarray,
+    candidate_ids: list[str] | None = None,
+    limit: int = 50,
+    min_similarity: float | None = None,
 ) -> list[str]:
     """Brute-force cosine similarity (ADR-0022) against the embeddings
     table. `candidate_ids=None` searches everything; an empty list is a
     real "nothing matched the filter" case and short-circuits to []
-    rather than silently searching everything."""
+    rather than silently searching everything.
+
+    Unlike keyword search, cosine similarity always ranks *something* -
+    even a genuinely irrelevant result looks "closest" relative to
+    everything else in the store. `min_similarity` (ADR-0026) is the
+    escape hatch: results below it are excluded rather than force-filled
+    into the top-k, so a query with no real match in the library can
+    return empty instead of confidently handing back noise. No default
+    value is set here - there's no real embedding data yet to calibrate
+    what "not a real match" actually looks like (see ADR-0026)."""
     if candidate_ids is not None and not candidate_ids:
         return []
 
@@ -70,6 +83,8 @@ def vector_search(
     similarities = (vectors @ query) / (vector_norms * query_norm + 1e-10)
 
     order = np.argsort(-similarities)[:limit]
+    if min_similarity is not None:
+        order = [i for i in order if similarities[i] >= min_similarity]
     return [ids[i] for i in order]
 
 
@@ -106,18 +121,24 @@ def semantic_search(
     filters: dict | None = None,
     limit: int = 20,
     fanout: int = 50,
+    min_similarity: float | None = None,
 ) -> list[str]:
     """The hybrid search behind the agent's semantic_search tool
     (ADR-0005). filters: optional {"kind": "image"|"video", "year": int}.
     fanout: how many candidates keyword/vector search each retrieve
     before fusion - larger than `limit` so RRF has real signal from both
     methods to work with, not just whatever each one's own top-`limit`
-    happened to contain.
+    happened to contain. min_similarity: passed through to vector_search
+    (ADR-0026) - a real value isn't set by default here yet either, for
+    the same reason (nothing to calibrate it against until real
+    embeddings exist).
     """
     candidate_ids = _filtered_asset_ids(conn, filters) if filters else None
 
     keyword_ranked = keyword_search(conn, query_text, candidate_ids, limit=fanout)
-    vector_ranked = vector_search(conn, query_vector, candidate_ids, limit=fanout)
+    vector_ranked = vector_search(
+        conn, query_vector, candidate_ids, limit=fanout, min_similarity=min_similarity
+    )
 
     fused = reciprocal_rank_fusion([keyword_ranked, vector_ranked])
     return fused[:limit]

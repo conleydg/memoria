@@ -102,6 +102,39 @@ class TestVectorSearch:
         conn = connect(str(tmp_path / "t.sqlite"))
         assert vector_search(conn, np.array([1.0, 0.0])) == []
 
+    def test_min_similarity_excludes_weak_matches(self, tmp_path):
+        # ADR-0026: unlike keyword search, cosine similarity always ranks
+        # *something* - a query with no real match in the library
+        # shouldn't confidently hand back the least-bad option.
+        conn = connect(str(tmp_path / "t.sqlite"))
+        _insert_asset(conn, "close")
+        _insert_asset(conn, "unrelated")
+        _insert_embedding(conn, "close", np.array([1.0, 0.0]))
+        _insert_embedding(conn, "unrelated", np.array([0.0, 1.0]))  # orthogonal: similarity 0.0
+        conn.commit()
+
+        results = vector_search(conn, np.array([1.0, 0.0]), min_similarity=0.5)
+        assert results == ["close"]
+
+    def test_min_similarity_can_exclude_everything(self, tmp_path):
+        conn = connect(str(tmp_path / "t.sqlite"))
+        _insert_asset(conn, "a1")
+        _insert_embedding(conn, "a1", np.array([0.0, 1.0]))  # orthogonal to the query
+        conn.commit()
+
+        results = vector_search(conn, np.array([1.0, 0.0]), min_similarity=0.9)
+        assert results == []
+
+    def test_no_min_similarity_preserves_existing_behavior(self, tmp_path):
+        # Default (None) shouldn't filter anything, even a weak match -
+        # existing callers/tests shouldn't see any behavior change.
+        conn = connect(str(tmp_path / "t.sqlite"))
+        _insert_asset(conn, "a1")
+        _insert_embedding(conn, "a1", np.array([0.0, 1.0]))
+        conn.commit()
+
+        assert vector_search(conn, np.array([1.0, 0.0])) == ["a1"]
+
 
 # ---------------------------------------------------------------------------
 # keyword_search - FTS5, including the filter-then-limit correctness case
@@ -202,3 +235,18 @@ class TestSemanticSearch:
         _insert_asset(conn, "a1")
         conn.commit()
         assert semantic_search(conn, "nonexistent", np.array([1.0, 0.0])) == []
+
+    def test_min_similarity_lets_a_query_return_no_confident_match(self, tmp_path):
+        # ADR-0026: a query with no real match (no keyword hit, and the
+        # closest embedding is well below the confidence bar) should come
+        # back empty end-to-end, not confidently hand back an unrelated
+        # photo just because it was the "closest" one available.
+        conn = connect(str(tmp_path / "t.sqlite"))
+        _insert_asset(conn, "unrelated")
+        _insert_embedding(conn, "unrelated", np.array([0.0, 1.0]))
+        conn.commit()
+
+        results = semantic_search(
+            conn, "llama", np.array([1.0, 0.0]), min_similarity=0.5
+        )
+        assert results == []

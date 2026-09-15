@@ -22,6 +22,8 @@ A small custom harness will be built rather than adopting a heavy existing frame
 
 Expression scorer accuracy (ADR-0007) on this specific library is treated as a spot-check against the ranking eval's hand-picked groups, not a separate track — reuse the same ~50-100 sampled groups rather than building a third dataset.
 
+**Zero-result queries, added after a real gap surfaced (ADR-0026):** unlike keyword search, cosine similarity always ranks *something*, even when nothing in the library is a real match — a query for a category the library genuinely has zero photos of could otherwise get a confidently-wrong answer. The retrieval query set needs a handful of deliberate zero-result queries (something genuinely absent from the library) with a known true answer of "nothing," used both to calibrate the `min_similarity` threshold (ADR-0026) and as an agent-behavior eval case: does the agent honestly report "no photos found," or does it present a low-confidence result as if it were a match.
+
 ## Consequences
 
 - Ground truth costs a few hours of manual review, not weeks of labeling.

@@ -29,3 +29,4 @@ Each file records one decision: the context that motivated it, what was decided,
 | [0023](0023-people-and-pets-cached-at-index-time.md) | People and pets cached at index time, not joined live against Photos | Accepted (known limitation) |
 | [0024](0024-asset-status-is-pipeline-status.md) | `assets.status` is pipeline status, not a review decision | Accepted |
 | [0025](0025-stable-face-identity-key.md) | `expression_scores` keyed by Photos' own face identity, not an invented index | Accepted |
+| [0026](0026-minimum-similarity-threshold.md) | Vector search can return "no confident match," not just a forced top-k | Accepted (threshold value deferred) |
