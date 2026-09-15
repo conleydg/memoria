@@ -29,8 +29,41 @@ CREATE TABLE IF NOT EXISTS assets (
     trashed INTEGER NOT NULL DEFAULT 0,        -- mirrors ZASSET.ZTRASHEDSTATE
     indexed_at REAL,                           -- last time THIS project fully indexed it; NULL = never
     removed_at REAL,                           -- set once detected gone from Photos (ADR-0018); NULL = still present
-    status TEXT NOT NULL DEFAULT 'pending',
-    note TEXT
+    status TEXT NOT NULL DEFAULT 'pending',    -- pipeline status (ADR-0024): pending|indexing|indexed|failed
+    note TEXT                                  -- failure reason, when status = 'failed'
+);
+
+-- ADR-0023: people/pets are cached here at index time, never joined live
+-- against Photos.sqlite at query time - keeps the on-demand agent fully
+-- self-contained against this one file.
+CREATE TABLE IF NOT EXISTS asset_people (
+    asset_id TEXT NOT NULL REFERENCES assets(uuid),
+    person_key TEXT NOT NULL,                  -- Photos' own ZPERSON identifier (stable across renames)
+    person_name TEXT NOT NULL,                 -- cached at index time; may go stale on rename, see ADR-0023
+    cached_at REAL NOT NULL,
+    PRIMARY KEY (asset_id, person_key)
+);
+
+CREATE TABLE IF NOT EXISTS pets (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pet_reference_photos (
+    pet_id INTEGER NOT NULL REFERENCES pets(id),
+    asset_id TEXT NOT NULL REFERENCES assets(uuid),
+    added_at REAL NOT NULL,
+    PRIMARY KEY (pet_id, asset_id)
+);
+
+CREATE TABLE IF NOT EXISTS pet_matches (
+    asset_id TEXT NOT NULL REFERENCES assets(uuid),
+    pet_id INTEGER NOT NULL REFERENCES pets(id),
+    similarity REAL NOT NULL,                  -- suggestion only (ADR-0014), never acted on automatically
+    model_version TEXT NOT NULL,
+    computed_at REAL NOT NULL,
+    PRIMARY KEY (asset_id, pet_id)
 );
 
 CREATE TABLE IF NOT EXISTS tags (
@@ -70,11 +103,13 @@ CREATE TABLE IF NOT EXISTS quality_scores (
 
 CREATE TABLE IF NOT EXISTS expression_scores (
     asset_id TEXT NOT NULL REFERENCES assets(uuid),
-    face_index INTEGER NOT NULL,               -- which detected face within the asset, 0-based
+    face_key TEXT NOT NULL,                    -- Photos' own ZDETECTEDFACE identifier (ADR-0025) -
+                                                -- never an invented per-run index, which silently
+                                                -- breaks if detection order changes between runs
     smile REAL,
     model_version TEXT NOT NULL,
     computed_at REAL NOT NULL,
-    PRIMARY KEY (asset_id, face_index)
+    PRIMARY KEY (asset_id, face_key)
 );
 
 CREATE TABLE IF NOT EXISTS duplicate_groups (
