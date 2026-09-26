@@ -20,7 +20,7 @@ Each file records one decision: the context that motivated it, what was decided,
 | [0014](0014-suggestion-only-never-auto-delete.md) | Every output is a suggestion — nothing deletes or modifies the library | Accepted |
 | [0015](0015-people-via-photos-native-clustering.md) | Read Apple's own face clustering for people, don't rebuild it | Accepted |
 | [0016](0016-pet-identification-few-shot-siglip2.md) | Pet identification via few-shot SigLIP2 matching | Accepted |
-| [0017](0017-require-full-local-originals.md) | Require Photos originals fully downloaded locally | Accepted |
+| [0017](0017-require-full-local-originals.md) | Require Photos originals fully downloaded locally | Accepted (amended by 0027) |
 | [0018](0018-asset-lifecycle-edits-and-deletions.md) | Detect edited and deleted/trashed assets, not just new ones | Accepted |
 | [0019](0019-model-upgrade-policy.md) | Model upgrades trigger a deliberate full re-index | Accepted |
 | [0020](0020-index-backup.md) | Back up the index file via the existing external-drive process | Accepted |
@@ -30,3 +30,4 @@ Each file records one decision: the context that motivated it, what was decided,
 | [0024](0024-asset-status-is-pipeline-status.md) | `assets.status` is pipeline status, not a review decision | Accepted |
 | [0025](0025-stable-face-identity-key.md) | `expression_scores` keyed by Photos' own face identity, not an invented index | Accepted |
 | [0026](0026-minimum-similarity-threshold.md) | Vector search can return "no confident match," not just a forced top-k | Accepted (threshold value deferred) |
+| [0027](0027-fetch-originals-from-another-mac.md) | Fetch originals on demand from another Mac on the local network | Accepted |

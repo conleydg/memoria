@@ -16,7 +16,7 @@ That's not a search problem alone — it's search *plus* ranking *plus*, sometim
 
 - **Fully local.** No photo or video data is ever sent to a third-party AI service, under any privacy terms. No dependency on internet connectivity to use your own library.
 - **Suggestions, not actions.** Every score, group, or ranking this system produces is a suggestion surfaced for review. Nothing here writes back to Apple Photos or deletes a file — that stays manual, always.
-- **Originals must be fully local.** "Optimize Mac Storage" must be off for the library being indexed — see [ADR-0017](docs/adr/0017-require-full-local-originals.md).
+- **Originals must be fully local.** "Optimize Mac Storage" must be off for the library being indexed — see [ADR-0017](docs/adr/0017-require-full-local-originals.md). The library can live on another Mac on the same network, with originals pulled over SSH as needed — see [ADR-0027](docs/adr/0027-fetch-originals-from-another-mac.md).
 
 See [docs/adr/](docs/adr/) for the reasoning behind every non-obvious decision below, and [docs/how-ai-was-used.md](docs/how-ai-was-used.md) for an honest account of the AI-assisted process that produced this repo — including where it hasn't been tested yet.
 
@@ -48,6 +48,7 @@ The target hardware (a Mac Studio, 64GB unified memory) hasn't arrived yet, so t
 - [x] Architecture design
 - [x] Schema + asset-lifecycle logic
 - [x] Hybrid search (RRF) layer, tested against synthetic data (`src/memoria/`, 36 tests)
+- [x] On-demand fetching from a library on another Mac (ADR-0027), tested against a fake SSH
 - [ ] Eval harness
 - [ ] Indexing pipeline (the AI-model side — needs the Mac Studio)
 - [ ] Agent / query layer (the search logic exists; the tool-calling loop around it doesn't yet)

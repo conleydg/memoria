@@ -1,6 +1,6 @@
 # ADR-0017: Require Photos originals fully downloaded locally, not iCloud-optimized
 
-**Status:** Accepted (2026-09-14)
+**Status:** Accepted (2026-09-14), amended by [ADR-0027](0027-fetch-originals-from-another-mac.md): originals may also live on another Mac on the local network.
 
 ## Context
 
