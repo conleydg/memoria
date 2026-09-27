@@ -7,11 +7,13 @@ boundary, and it's injected below.
 import os
 import shlex
 import sqlite3
+import threading
 
 import pytest
 
 from memoria.remote_library import (
     REMOTE_SNAPSHOT_PATH,
+    Prefetched,
     RemoteLibrary,
     evict_to_budget,
     original_relpath,
@@ -122,7 +124,7 @@ class TestEvictToBudget:
         old.write_bytes(b"x" * 10)
         os.utime(old, (1, 1))
         os.utime(big, (0, 0))  # oldest, but it's the one in use
-        evicted = evict_to_budget(tmp_path, 20, keep=big)
+        evicted = evict_to_budget(tmp_path, 20, keep={big})
         assert evicted == [old]
         assert big.exists()
 
@@ -159,3 +161,99 @@ class TestSnapshotPhotosDb:
         with pytest.raises(ConnectionError):
             lib.snapshot_photos_db(tmp_path / "Photos.sqlite")
         assert shlex.split(ssh.commands[-1]) == ["rm", "-f", REMOTE_SNAPSHOT_PATH]
+
+
+def originals(n, size=10):
+    return {f"{LIBRARY}/originals/{i % 10}/{i}.heic": bytes([i % 256]) * size for i in range(n)}
+
+
+def relpaths(n):
+    return [f"originals/{i % 10}/{i}.heic" for i in range(n)]
+
+
+class TestPrefetch:
+    def test_yields_every_original_in_order(self, tmp_path):
+        lib, _ = make_library(tmp_path, originals(20))
+        got = [(item.relpath, item.path.read_bytes()) for item in lib.prefetch(relpaths(20))]
+        assert got == [(r, bytes([i]) * 10) for i, r in enumerate(relpaths(20))]
+
+    def test_later_files_download_while_the_first_is_still_in_flight(self, tmp_path):
+        # The fake blocks the first transfer until the second one has
+        # started - which only happens if transfers run in parallel.
+        lib, ssh = make_library(tmp_path, originals(2))
+        second_started = threading.Event()
+
+        def run(argv, check=False, stdout=None, **kwargs):
+            if "/1.heic" in argv[2]:
+                second_started.set()
+            elif not second_started.wait(timeout=5):
+                raise AssertionError("second download never started")
+            return ssh(argv, check=check, stdout=stdout)
+
+        lib.run = run
+        assert [i.error for i in lib.prefetch(relpaths(2), workers=2)] == [None, None]
+
+    def test_downloads_run_ahead_of_the_consumer(self, tmp_path):
+        lib, ssh = make_library(tmp_path, originals(10))
+        items = lib.prefetch(relpaths(10), workers=2, ahead=4)
+        next(items)
+        # Everything in the window is queued the moment the first item is
+        # handed over; give the workers a moment to finish it.
+        for _ in range(100):
+            if len(ssh.commands) >= 5:
+                break
+            threading.Event().wait(0.01)
+        assert len(ssh.commands) == 5  # the first, plus 4 ahead - no more
+        items.close()
+
+    def test_a_failed_fetch_is_reported_and_the_rest_continue(self, tmp_path):
+        files = originals(3)
+        del files[f"{LIBRARY}/originals/1/1.heic"]
+        lib, _ = make_library(tmp_path, files)
+        items = list(lib.prefetch(relpaths(3)))
+        assert [i.path is not None for i in items] == [True, False, True]
+        assert isinstance(items[1].error, FileNotFoundError)
+
+    def test_files_fetched_ahead_are_never_evicted_before_use(self, tmp_path):
+        # Budget fits one file, but the window holds up to eight: files
+        # waiting their turn must survive the other downloads' eviction.
+        lib, _ = make_library(tmp_path, originals(20), max_cache_bytes=10)
+        for item in lib.prefetch(relpaths(20), workers=4, ahead=8):
+            assert item.path.exists()
+
+    def test_used_files_become_evictable_again(self, tmp_path):
+        lib, _ = make_library(tmp_path, originals(20), max_cache_bytes=30)
+        list(lib.prefetch(relpaths(20)))
+        assert lib._pinned == {}
+        lib.fetch("originals/0/0.heic")
+        cached = [p for p in (tmp_path / "cache").rglob("*") if p.is_file()]
+        assert sum(p.stat().st_size for p in cached) <= 30
+
+    def test_stopping_early_releases_every_pin(self, tmp_path):
+        lib, _ = make_library(tmp_path, originals(20))
+        for i, item in enumerate(lib.prefetch(relpaths(20), ahead=8)):
+            if i == 2:
+                break
+        assert lib._pinned == {}
+
+    def test_empty_input_yields_nothing(self, tmp_path):
+        lib, ssh = make_library(tmp_path)
+        assert list(lib.prefetch([])) == []
+        assert ssh.commands == []
+
+
+class TestFetchPinning:
+    def test_plain_fetch_leaves_nothing_pinned(self, tmp_path):
+        lib, _ = make_library(tmp_path, originals(1))
+        lib.fetch("originals/0/0.heic")
+        assert lib._pinned == {}
+
+    def test_pinned_file_survives_eviction_until_unpinned(self, tmp_path):
+        lib, _ = make_library(tmp_path, originals(3), max_cache_bytes=10)
+        first = lib.fetch("originals/0/0.heic", pin=True)
+        os.utime(first, (1, 1))
+        lib.fetch("originals/1/1.heic")
+        assert first.exists()
+        lib.unpin(first)
+        lib.fetch("originals/2/2.heic")
+        assert not first.exists()

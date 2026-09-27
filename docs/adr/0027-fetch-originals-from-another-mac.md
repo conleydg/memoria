@@ -22,7 +22,8 @@ The underlying requirement from ADR-0017 still holds: indexing must see full-res
 - Change detection (ADR-0018) runs against the latest snapshot, so it's only as fresh as the last `snapshot_photos_db` call; the watcher should take a new snapshot each cycle.
 - AppleScript-driven pieces (the ground-truth collector) still talk to Photos.app on whichever machine runs them. They only read asset references, never pixels, so they work against an iCloud-synced library on the Studio too.
 - Not yet verified against the real library: the `originals/<ZDIRECTORY>/<ZFILENAME>` layout (Photos 5+), and that the remote `sqlite3` accepts `-readonly` on the installed macOS version. Both should be checked on a handful of assets before the first full run.
-- Large videos pass through the cache one at a time; the cache budget must be at least as large as the biggest single video, or that video is kept over budget until the next fetch evicts it.
+- The models shouldn't sit idle waiting on the network. `RemoteLibrary.prefetch` keeps a window of upcoming originals (16 by default) downloading on background threads while the current one is being indexed. Files in that window are pinned, so eviction never deletes a file the pipeline hasn't reached. A failed fetch comes back as a result rather than stopping the run.
+- Pinned files may push the cache over its budget. Size the budget for roughly the prefetch window times the largest originals: a window full of long videos needs far more room than one full of photos.
 
 ## Alternatives considered
 
