@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · Asset</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<div id="explain"></div>
+<div id="root" class="muted">Loading…</div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("");
+document.getElementById("explain").innerHTML = explainer("one asset, every model", `
+  <p><b>Two kinds of numbers.</b> A model's <i>parameters</i> (the "30B" and "8B") are the weights it learned in training.
+  They're fixed and describe the model, not your photo. A <i>vector</i> (embedding) is the output SigLIP2 gives for
+  <i>this</i> photo: 1,152 numbers that place it in a "meaning space" where similar-looking or similar-meaning things sit close together.</p>
+  <p><b>Captions and tags</b> are text, so keyword search (SQLite FTS5) can find them by exact words. <b>The vector</b> is searched by
+  closeness to the vector of your query text, so it can match "puppy" to a photo tagged "dog". <b>Hybrid</b> combines both rankings.</p>
+  <p><b>Vectors are model-specific.</b> A SigLIP2 vector only means something next to other SigLIP2 vectors from the same model version.
+  Change the model and every vector must be recomputed (ADR-0019), which is why each result records its model version.</p>`);
+const id = new URLSearchParams(location.search).get("id");
+const root = document.getElementById("root");
+
+function vlmCol(v, other, name) {
+  if (!v) return `<div class="panel"><h3>${name}</h3><p class="muted">no result</p></div>`;
+  if (v.error) return `<div class="panel"><h3>${name}</h3><p class="bad">error: ${esc(v.error)}</p></div>`;
+  const shared = new Set(other?.tags || []);
+  return `<div class="panel"><h3>${name} <span class="muted small mono">${esc(v.model_version)}</span></h3>
+    <p>${esc(v.caption)}</p>
+    <div class="tags">${v.tags.map((t) => `<span class="tag ${shared.has(t) ? "shared" : ""}">${esc(t)}</span>`).join("")}</div>
+    ${v.ocr_text ? `<h3>OCR text</h3><pre>${esc(v.ocr_text)}</pre>` : `<p class="muted small">No text found in the image.</p>`}
+    <p class="small muted">${fmt(v.seconds, 2)} s · ${v.images_sent} image(s) · ${v.prompt_tokens} prompt tokens (mostly image) ·
+      ${v.output_tokens} output tokens at ${fmt(v.tokens_per_sec, 1)} tok/s</p>
+    <details><summary class="small">Raw prompt and response</summary><h3>Prompt</h3><pre>${esc(v.prompt)}</pre><h3>Response</h3><pre>${esc(v.raw_response)}</pre></details>
+  </div>`;
+}
+
+function fmtT(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`; }
+
+async function load() {
+  const a = await api(`/api/asset/${id}`);
+  document.title = `Model lab · ${fmtDate(a.date)}`;
+  const media = a.kind === "video"
+    ? `<video id="vid" controls preload="metadata" src="/media/${id}/video.mp4" poster="/media/${id}/thumb.jpg"></video>
+       <div class="frames">${[0, 1, 2, 3].map((i) => `<img src="/media/${id}/f${i}.jpg" title="keyframe ${i + 1} (sent to the VLMs and SigLIP2)">`).join("")}</div>
+       <p class="small muted">The 4 keyframes above are what the vision models actually saw.</p>`
+    : `<img src="/media/${id}/full.jpg" alt="">`;
+  const zs = a.zero_shot.map((z) => `<tr><td>${esc(z.label)}<div class="small muted">"${esc(z.prompt)}"</div></td>
+      <td class="num mono">${fmt(z.logit, 2)}</td><td class="num mono">${fmt(z.prob, 3)}</td>
+      <td style="width:35%"><div class="bar"><span style="width:${(z.softmax * 100).toFixed(1)}%"></span></div>
+      <span class="small mono">${(z.softmax * 100).toFixed(1)}%</span></td></tr>`).join("");
+  const t = a.timings;
+  const timeRows = Object.entries(t).map(([m, x]) => `<tr><td>${esc(m)}</td><td class="num mono">${fmt(x.seconds, 3)} s</td>
+      <td class="small muted mono">${x.detail ? esc(JSON.stringify(x.detail)) : ""}</td></tr>`).join("");
+  const qd = t["q-align"]?.detail;
+  const segs = a.segments.map((s) => `<div class="seg ${s.no_speech_prob >= 0.5 ? "nospeech" : ""}">
+      <span class="t" data-t="${s.start}">${fmtT(s.start)}–${fmtT(s.end)}</span><span>${esc(s.text)}</span>
+      <span class="small muted mono" title="Whisper's probability that this segment is not speech">p(no speech) ${fmt(s.no_speech_prob, 2)}</span></div>`).join("");
+  root.classList.remove("muted");
+  root.innerHTML = `
+    <div class="row"><h1 style="margin-right:auto">${a.kind === "video" ? "Video" : "Photo"} · ${fmtDate(a.date)}</h1>
+      <span class="small muted">sampled as: ${a.strata.map(esc).join(", ")}${a.dup_group ? " · near-duplicate group" : ""}</span></div>
+    <div class="cols two">
+      <div class="media-main">${media}
+        <p class="small muted mono">${esc(a.uuid)} · ${esc(a.uti)} · ${a.width}×${a.height}${a.duration ? " · " + a.duration.toFixed(1) + " s" : ""}</p></div>
+      <div>
+        <div class="panel"><h3>From Photos' own metadata <span class="small muted">(no model involved)</span></h3>
+          <p><b>When:</b> ${a.local ? esc(a.local) + (a.tz_name ? ` · ${esc(a.tz_name)}` : "") : fmtDate(a.date) + ' <span class="muted small">(UTC; Photos has no time zone for this item)</span>'}</p>
+          <p><b>People:</b> ${a.people.length ? a.people.map((p) => `<span class="tag">${esc(p)}</span>`).join(" ") : '<span class="muted">none named</span>'}
+            <span class="small muted">· ${a.faces ?? 0} face(s) detected${a.faces > a.people.length ? `, ${a.faces - a.people.length} not named in Photos` : ""}</span></p>
+          <p><b>Where:</b> ${a.gps ? `<span class="mono">${a.gps[0].toFixed(4)}, ${a.gps[1].toFixed(4)}</span> <span class="small muted">(raw GPS. Place names would need a geocoding service, which would send the location off this Mac.)</span>` : '<span class="muted">no location</span>'}</p>
+          <p class="small muted">People come from Photos' face recognition (ADR-0015), cached here at index time (ADR-0023) and added to the keyword index. That's what lets "name + beach" work: the name matches by keyword, "beach" by caption or vector.</p>
+        </div>
+        <div class="panel" style="margin-top:12px"><h3>Quality (Q-Align)</h3>
+          ${qd ? `<div class="stat"><b>${fmt(qd.aesthetic, 2)}</b><span class="small muted">aesthetic (1–5)</span></div>
+                  <div class="stat"><b>${fmt(qd.quality, 2)}</b><span class="small muted">technical quality (1–5)</span></div>
+                  <p class="small muted">Q-Align asks a vision-language model to rate the image as "bad / poor / fair / good / excellent"
+                  and turns the probabilities of those words into a number. Handy for picking the best of a group; ADR-0006
+                  plans to check it against your own picks.</p>` : `<p class="muted">not scored</p>`}
+        </div>
+        <div class="panel" style="margin-top:12px"><h3>SigLIP2 zero-shot labels</h3>
+          <table><tr><th>label / prompt</th><th class="num">logit</th><th class="num">sigmoid</th><th>softmax share</th></tr>${zs}</table>
+          <p class="small muted">SigLIP2 scores each label on its own (sigmoid), so they don't have to add up to 1. The softmax
+          column forces a choice between them, and the top one is the label used for filtering.</p>
+          <p class="small muted mono">${esc(a.embedding_model || "")}</p></div>
+        <div class="panel" style="margin-top:12px"><h3>Timings for this asset</h3><table>${timeRows}</table></div>
+      </div>
+    </div>
+    <h2>Caption and tags: 30B vs 8B, same prompt</h2>
+    <p class="small muted">Tags with a green outline were produced by both models.</p>
+    <div class="cols two">${vlmCol(a.vlm["qwen3-vl-30b"], a.vlm["qwen3-vl-8b"], "Qwen3-VL 30B-A3B")}${vlmCol(a.vlm["qwen3-vl-8b"], a.vlm["qwen3-vl-30b"], "Qwen3-VL 8B")}</div>
+    ${a.kind === "video" ? `<h2>Transcript (Whisper large-v3-turbo)</h2><div class="panel">
+      ${a.has_audio ? (a.segments.length ? `<p class="small muted">Language: ${esc(a.transcript_meta?.language)} ·
+        ${a.transcript_meta?.has_speech ? "speech detected" : "no confident speech. Faded segments are probably Whisper filling silence or noise with invented words, which is why they're kept out of search."}
+        · click a timestamp to jump</p>${segs}` : `<p class="muted">No segments.</p>`) : `<p class="muted">This video has no audio track.</p>`}</div>` : ""}
+    <h2>How could this be found?</h2>
+    <div id="find" class="panel muted">Running searches…</div>
+    <h2>More like this <span class="small muted">(nearest SigLIP2 vectors)</span></h2>
+    <div id="similar" class="grid"></div>`;
+  document.querySelectorAll(".seg .t").forEach((el) => el.addEventListener("click", () => {
+    const v = document.getElementById("vid"); v.currentTime = parseFloat(el.dataset.t); v.play();
+  }));
+  loadFind(); loadSimilar();
+}
+
+async function loadFind() {
+  const el = document.getElementById("find");
+  const f = await api(`/api/findability/${id}`);
+  if (!f.queries.length) { el.innerHTML = "No example queries were generated for this asset."; return; }
+  const k = f.rrf_k;
+  const rk = (r) => (r ? `#${r}` : `<span class="muted">not found</span>`);
+  const rows = f.queries.map((q) => {
+    const p = q.hybrid?.parts || {};
+    const math = q.hybrid ? Object.entries(p).map(([m, x]) => `<span class="${m === "keyword" ? "kw" : "vec"}">1/(${k}+${x.rank})=${x.contribution.toFixed(4)}</span>`).join(" + ")
+      + ` = <b class="hy">${q.hybrid.score.toFixed(4)}</b>` : "";
+    return `<tr><td><b>"${esc(q.query)}"</b><div class="small muted mono">FTS: ${esc(q.fts_expression)}</div></td>
+      <td class="rankcell kw">${rk(q.keyword_rank)}<div class="small muted">${q.keyword_hits} matched</div></td>
+      <td class="rankcell vec">${rk(q.vector_rank)}<div class="small muted">cos ${fmt(q.vector_sim, 3)}</div></td>
+      <td class="rankcell hy">${rk(q.hybrid_rank)}<div class="small">${math}</div></td>
+      <td><a href="/search?q=${encodeURIComponent(q.query)}">open in playground →</a></td></tr>`;
+  }).join("");
+  el.classList.remove("muted");
+  el.innerHTML = `<p class="small">Four queries someone might type to find this item, written by the 8B model from the 30B caption, plus each named person's name on its own.
+    Watch the name rows: keyword finds them (the name comes from Photos), but vector search can't, because SigLIP2 has never seen your family.
+    For each one, this is where the item ranks among all ${f.total} test assets. #1 is best. They come from the caption, so they tend to favour keyword search.</p>
+    <table><tr><th>query</th><th class="kw">keyword (FTS5)</th><th class="vec">vector (SigLIP2)</th><th class="hy">hybrid (RRF) and the math</th><th></th></tr>${rows}</table>
+    <p class="small muted">Reciprocal Rank Fusion ignores raw scores. BM25 and cosine similarity aren't on comparable scales, so RRF uses
+    only each method's rank: score = Σ 1/(k + rank), with k = ${k}. An item ranked well by both methods beats one ranked #1 by just one.</p>`;
+}
+
+async function loadSimilar() {
+  const s = await api(`/api/similar/${id}`);
+  // Rough bands from this test set (burst pairs score ~0.99; the median
+  // photo's nearest neighbour ~0.78). Not calibrated - see ADR-0026.
+  const band = (x) => (x >= 0.9 ? "near-duplicate" : x >= 0.8 ? "similar" : "loosely related");
+  const close = s.results.filter((h) => h.score >= 0.8).length;
+  document.getElementById("similar").innerHTML = s.results.map((h) => card(s.assets[h.id],
+    { score: h.score.toFixed(3), dim: h.score < 0.8, title: `cosine ${h.score.toFixed(3)}: ${band(h.score)}` })).join("");
+  document.getElementById("similar").insertAdjacentHTML("beforebegin", `<p class="small muted">${close ? `${close} close match(es) (cosine ≥ 0.8).` : "No close matches in the test set."}
+    Faded = below 0.8, meaning just the least different of the test set, not a real match. Like vector search, "more like this" always returns
+    something (ADR-0026). Random-sample items often have no true neighbour here. Items sampled as "event" do; try one of those.</p>`);
+}
+load().catch((e) => (root.textContent = "Error: " + e.message));
+</script></body></html>

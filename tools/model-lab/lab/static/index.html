@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · Gallery</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<h1>Test set gallery</h1>
+<div id="explain"></div>
+<div class="filters panel">
+  <label>Type <select id="f-kind"><option value="">all</option><option>image</option><option>video</option></select></label>
+  <label>Year <select id="f-year"><option value="">all</option></select></label>
+  <label>Zero-shot label <select id="f-label"><option value="">all</option></select></label>
+  <label>Person <select id="f-person"><option value="">anyone</option><option value="__named">any named person</option><option value="__faces">any face (named or not)</option></select></label>
+  <label>Sampled as <select id="f-stratum"><option value="">any</option></select></label>
+  <label>Aesthetic ≥ <input id="f-q" type="range" min="1" max="5" step="0.25" value="1"><span id="f-qv" class="mono">1.00</span></label>
+  <label>Sort <select id="f-sort"><option value="date">date</option><option value="aesthetic">aesthetic ↓</option><option value="quality">quality ↓</option></select></label>
+  <span id="count" class="muted small"></span>
+</div>
+<div id="grid" class="grid"></div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("/");
+document.getElementById("explain").innerHTML = explainer("the gallery", `
+  <p>These are the ~200 test assets sampled from your library (a spread of years, plus people, pets, low light,
+  screenshots, near-duplicates and videos). Every model ran over each one. Click any item to see what each model produced.</p>
+  <p><b>Zero-shot label</b> is SigLIP2's guess among "photo / screenshot / document / receipt". Nobody trained it on
+  those categories. It compares the image's vector with the vector of a sentence like "a screenshot of a phone or computer
+  screen" and picks the closest (ADR-0010). <b>Aesthetic</b> is Q-Align's 1–5 score (Q-Align is a separate model).</p>
+  <p><b>Person</b> doesn't come from any of these models. It comes from Photos' own face recognition, copied from the Photos database
+  (ADR-0015/0023). None of our models know who your family are. Only people you've named in Photos can be filtered or searched.</p>`);
+let all = [];
+const $ = (id) => document.getElementById(id);
+function fill(sel, values) { values.forEach((v) => sel.insertAdjacentHTML("beforeend", `<option>${esc(v)}</option>`)); }
+function render() {
+  const kind = $("f-kind").value, year = $("f-year").value, label = $("f-label").value, st = $("f-stratum").value, pe = $("f-person").value;
+  const q = parseFloat($("f-q").value); $("f-qv").textContent = q.toFixed(2);
+  let xs = all.filter((a) => (!kind || a.kind === kind) && (!year || String(a.year) === year) &&
+    (!label || a.label === label) && (!st || a.strata.includes(st)) &&
+    (!pe || (pe === "__named" ? a.people.length > 0 : pe === "__faces" ? a.faces > 0 : a.people.includes(pe))) && (q <= 1 || (a.aesthetic ?? 0) >= q));
+  const s = $("f-sort").value;
+  if (s !== "date") xs = xs.slice().sort((a, b) => (b[s] ?? -1) - (a[s] ?? -1));
+  $("count").textContent = `${xs.length} of ${all.length}`;
+  $("grid").innerHTML = xs.map((a) => card(a)).join("");
+}
+api("/api/assets").then((xs) => {
+  all = xs.filter((a) => a.status !== "failed");
+  fill($("f-year"), [...new Set(all.map((a) => a.year))].sort());
+  fill($("f-label"), [...new Set(all.map((a) => a.label).filter(Boolean))].sort());
+  fill($("f-person"), [...new Set(all.flatMap((a) => a.people))].sort());
+  fill($("f-stratum"), [...new Set(all.flatMap((a) => a.strata))].sort());
+  ["f-kind", "f-year", "f-label", "f-person", "f-stratum", "f-q", "f-sort"].forEach((id) => $(id).addEventListener("input", render));
+  render();
+});
+</script></body></html>

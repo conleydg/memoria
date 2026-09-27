@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · Embedding map</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<h1>Embedding map</h1>
+<div id="explain"></div>
+<div class="filters panel">
+  <label>Projection <select id="proj"><option value="umap">UMAP</option><option value="pca">PCA</option></select></label>
+  <label>Color by <select id="color"><option value="label">zero-shot label</option><option value="year">year</option><option value="kind">type</option><option value="aesthetic">aesthetic</option></select></label>
+  <label><input type="checkbox" id="thumbs"> show thumbnails</label>
+  <span id="legend" class="legend"></span>
+</div>
+<div class="panel" style="padding:0;position:relative"><canvas id="c" style="width:100%;height:72vh;display:block;cursor:crosshair"></canvas></div>
+<p id="note" class="small muted"></p>
+<div id="tooltip"></div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("/map");
+document.getElementById("explain").innerHTML = explainer("squashing 1,152 dimensions into 2", `
+  <p>Each dot is one photo or video, placed by its SigLIP2 vector. The real vectors have 1,152 dimensions. To draw them,
+  a <b>projection</b> squashes them to 2. <b>PCA</b> keeps the two directions with the most variation (straight-line, faithful but blurry).
+  <b>UMAP</b> tries to keep each item's nearest neighbours near it (good at showing clusters, but distances between clusters aren't meaningful).</p>
+  <p>Look for clusters: screenshots and documents usually sit far from real-world photos, pets and people form groups, and
+  near-duplicates land on top of each other. Hover to see what's there, click to open it.</p>`);
+const $ = (id) => document.getElementById(id);
+const cv = $("c"), ctx = cv.getContext("2d"), tip = $("tooltip");
+let data, pts = [], imgs = {};
+function colorOf(a, mode, yr) {
+  if (mode === "label") return LABEL_COLORS[a.label] || "#888";
+  if (mode === "year") return a.year ? yearColor(a.year, yr[0], yr[1]) : "#888";
+  if (mode === "kind") return a.kind === "video" ? "#e8710a" : "#4c8bf5";
+  if (a.aesthetic == null) return "#888";
+  const t = Math.min(1, Math.max(0, (a.aesthetic - 1) / 4)); return `hsl(${Math.round(10 + 110 * t)}, 70%, 45%)`;
+}
+function draw() {
+  const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  const proj = $("proj").value, mode = $("color").value, xy = data[proj] || data.pca;
+  const xs = xy.map((p) => p[0]), ys = xy.map((p) => p[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)], pad = 40;
+  const years = data.ids.map((i) => data.assets[i]?.year).filter(Boolean), yr = [Math.min(...years), Math.max(...years)];
+  const showThumbs = $("thumbs").checked;
+  pts = data.ids.map((id, n) => ({ id, a: data.assets[id], x: pad + (xy[n][0] - x0) / (x1 - x0 || 1) * (W - 2 * pad), y: pad + (xy[n][1] - y0) / (y1 - y0 || 1) * (H - 2 * pad) }));
+  for (const p of pts) {
+    if (!p.a) continue;
+    const c = colorOf(p.a, mode, yr);
+    if (showThumbs) {
+      const im = imgs[p.id] || (imgs[p.id] = Object.assign(new Image(), { src: `/media/${p.id}/thumb.jpg`, onload: () => requestAnimationFrame(draw) }));
+      if (im.complete && im.naturalWidth) { ctx.drawImage(im, p.x - 14, p.y - 14, 28, 28); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.strokeRect(p.x - 14, p.y - 14, 28, 28); continue; }
+    }
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, 7); ctx.fillStyle = c; ctx.fill();
+  }
+  const leg = mode === "label" ? Object.entries(LABEL_COLORS).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("")
+    : mode === "year" ? `<span><i style="background:${yearColor(yr[0], ...yr)}"></i>${yr[0]}</span><span><i style="background:${yearColor(yr[1], ...yr)}"></i>${yr[1]}</span>`
+    : mode === "kind" ? `<span><i style="background:#4c8bf5"></i>photo</span><span><i style="background:#e8710a"></i>video</span>`
+    : `<span><i style="background:hsl(10,70%,45%)"></i>1</span><span><i style="background:hsl(120,70%,45%)"></i>5</span>`;
+  $("legend").innerHTML = leg;
+  $("note").textContent = proj === "pca" || !data.umap ? `PCA: these 2 axes capture ${(data.pca_variance[0] * 100).toFixed(1)}% + ${(data.pca_variance[1] * 100).toFixed(1)}% of the variance. The rest is flattened away.` + (data.umap_error ? ` (UMAP unavailable: ${data.umap_error})` : "") : "UMAP (cosine, 12 neighbours): local neighbourhoods are meaningful; global distances are not.";
+}
+function nearest(e) {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  let best = null, bd = 400;
+  for (const p of pts) { const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < bd) { bd = d; best = p; } }
+  return best;
+}
+cv.addEventListener("mousemove", (e) => {
+  const p = nearest(e);
+  if (!p?.a) { tip.style.display = "none"; return; }
+  tip.innerHTML = `<img src="/media/${p.id}/thumb.jpg"><div>${p.a.kind} · ${fmtDate(p.a.date)} · ${esc(p.a.label)}${p.a.aesthetic != null ? " · ★" + fmt(p.a.aesthetic, 1) : ""}</div>`;
+  tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 14, innerWidth - 210) + "px"; tip.style.top = Math.min(e.clientY + 14, innerHeight - 240) + "px";
+});
+cv.addEventListener("mouseleave", () => (tip.style.display = "none"));
+cv.addEventListener("click", (e) => { const p = nearest(e); if (p) location.href = `/asset?id=${p.id}`; });
+["proj", "color", "thumbs"].forEach((id) => $(id).addEventListener("input", draw));
+addEventListener("resize", draw);
+$("note").textContent = "Computing projection (first load runs UMAP, a few seconds)…";
+api("/api/map").then((d) => { data = d; draw(); }).catch((e) => ($("note").textContent = "Error: " + e.message));
+</script></body></html>

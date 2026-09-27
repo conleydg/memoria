@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · Search</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<h1>Search playground</h1>
+<div id="explain"></div>
+<form id="form" class="filters panel">
+  <input id="q" type="search" placeholder="e.g. dog at the beach, birthday cake, receipt" style="flex:1;min-width:260px" autofocus>
+  <label>Keyword index <select id="index"><option value="30b">30B captions</option><option value="8b">8B captions</option></select></label>
+  <label>Words <select id="mode"><option value="or">any word (OR)</option><option value="and">all words (AND)</option></select></label>
+  <label title="ADR-0026: vector hits below this cosine similarity are treated as 'no confident match'">
+    Min similarity <input id="min" type="range" min="0" max="0.3" step="0.005" value="0"><span id="minv" class="mono">off</span></label>
+  <button class="primary">Search</button>
+  <span id="info" class="small muted"></span>
+</form>
+<div id="out"></div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("/search");
+document.getElementById("explain").innerHTML = explainer("keyword vs vector vs hybrid", `
+  <p><b>Keyword (FTS5)</b> looks for your words in the text the models wrote (caption, tags, OCR, transcript), ranked by BM25:
+  rarer words and denser matches rank higher. It's exact. It finds a name or a word on a sign, but "puppy" won't find "dog".
+  When nothing contains your words, it honestly returns nothing.</p>
+  <p><b>Vector (SigLIP2)</b> turns your query into a vector with SigLIP2's <i>text</i> encoder and ranks every photo's
+  <i>image</i> vector by cosine similarity (1 = same direction). The two encoders were trained together, so text and images
+  share one space. It finds meaning without exact words. But it <i>always</i> returns a ranking, even when nothing really matches.</p>
+  <p><b>Minimum similarity (ADR-0026)</b> is the fix for that: vector hits below the threshold are dropped (faded here) instead of padding the
+  list. SigLIP2 query-to-image similarities are small numbers (often 0.05–0.2), so try a query for something you've never photographed and see
+  where the top score lands. That's how the threshold gets calibrated.</p>
+  <p><b>Hybrid (RRF)</b> fuses the two rankings using only rank positions: Σ 1/(60 + rank). Items both methods like float to the top,
+  covering each method's blind spots (ADR-0010).</p>`);
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+if (params.get("q")) $("q").value = params.get("q");
+$("min").addEventListener("input", () => { const v = parseFloat($("min").value); $("minv").textContent = v ? v.toFixed(3) : "off"; });
+
+function col(title, cls, hits, assets, scoreFn, note) {
+  return `<div><h2 class="${cls}">${title}</h2><p class="small muted">${note}</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">
+    ${hits.length ? hits.map((h, i) => card(assets[h.id], { score: `#${i + 1} ${scoreFn(h)}`, dim: h.below_threshold, title: h.title || "" })).join("") : `<p class="muted">No results.</p>`}</div></div>`;
+}
+
+async function run(e) {
+  e?.preventDefault();
+  const q = $("q").value.trim(); if (!q) return;
+  history.replaceState(null, "", "?q=" + encodeURIComponent(q));
+  const min = parseFloat($("min").value);
+  $("info").textContent = "searching… (the first query loads SigLIP2's text encoder)";
+  const url = `/api/search?q=${encodeURIComponent(q)}&index=${$("index").value}&mode=${$("mode").value}` + (min ? `&min_sim=${min}` : "");
+  try {
+    const r = await api(url);
+    $("info").textContent = `${r.ms.toFixed(0)} ms · FTS5 expression: ${r.fts_expression || "(no searchable words)"}`;
+    const k = r.rrf_k;
+    r.hybrid.forEach((h) => { h.title = Object.entries(h.parts).map(([m, x]) => `${m} #${x.rank}: 1/(${k}+${x.rank}) = ${x.contribution.toFixed(4)}`).join("\n") + `\nsum = ${h.score.toFixed(4)}`; });
+    const topSim = r.vector[0]?.score;
+    $("out").innerHTML = `<div class="cols three">
+      ${col("Keyword · FTS5", "kw", r.keyword, r.assets, (h) => h.score.toFixed(2), `${r.keyword_total} item(s) contain the words. Score = BM25 (higher is better).`)}
+      ${col("Vector · SigLIP2", "vec", r.vector, r.assets, (h) => h.score.toFixed(3),
+        `Cosine similarity. Top score ${fmt(topSim, 3)}.` + (r.vector_above_threshold != null ? ` ${r.vector_above_threshold} above the threshold; faded = below it.` : " Always returns something."))}
+      ${col("Hybrid · RRF", "hy", r.hybrid, r.assets, (h) => h.score.toFixed(4), `Σ 1/(${k} + rank). Hover a result to see its math.`)}
+    </div>`;
+  } catch (err) { $("info").textContent = "Error: " + err.message; }
+}
+$("form").addEventListener("submit", run);
+if ($("q").value) run();
+</script></body></html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · Stats</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<h1>Model stats</h1>
+<div id="explain"></div>
+<div id="root" class="muted">Loading…</div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("/stats");
+document.getElementById("explain").innerHTML = explainer("speed, memory and the full-library estimate", `
+  <p><b>Load time</b> is reading weights from disk into (unified) memory. It's paid once per batch, which is why ADR-0013 runs a nightly batch
+  instead of keeping models resident. <b>Per-asset latency</b> is the time for one photo (or one video's 4 keyframes) once loaded.</p>
+  <p><b>Tokens/sec</b> applies to the language models only: how fast they write output text. Each image first becomes a few hundred
+  "prompt tokens" that the model reads (prompt processing) before it writes the caption.</p>
+  <p><b>Why is the 30B model fast?</b> It's a mixture-of-experts: 30B parameters in total, but only about 3B are active for each token, so it
+  writes about as fast as a 3B model while knowing more. It still needs memory for all 30B parameters.</p>
+  <p><b>The projection</b> multiplies average per-asset time by your library's counts, running one model at a time. It's a rough
+  first-pass estimate: no batching or parallelism, and videos are estimated from the test clips.</p>`);
+const LABEL = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-8b": "Qwen3-VL 8B", siglip2: "SigLIP2 so400m", whisper: "Whisper large-v3-turbo", "q-align": "Q-Align (OneAlign)" };
+api("/api/stats").then((s) => {
+  const runs = s.runs.map((r) => {
+    const p = s.per_asset[r.model] || {}, tk = s.tokens[r.model];
+    const lat = ["image", "video"].map((k) => p[k] ? `${k}: ${fmt(p[k].mean, 2)} s avg · p50 ${fmt(p[k].p50, 2)} · p90 ${fmt(p[k].p90, 2)} (n=${p[k].n})` : "").filter(Boolean).join("<br>");
+    return `<tr><td><b>${LABEL[r.model] || esc(r.model)}</b><div class="small muted">${esc(r.role)}</div><div class="small mono muted">${esc(r.model_version)}</div></td>
+      <td class="small">${esc(r.runtime)}<div class="muted">${esc(r.license)}</div></td>
+      <td class="num">${fmtBytes(r.disk_bytes)}</td><td class="num">${fmt(r.load_seconds, 1)} s</td>
+      <td class="small">${lat || (r.model === "whisper" ? "" : "–")}${r.model === "whisper" && s.whisper_rtf ? `<br>${fmt(s.whisper_rtf, 3)} s per audio-second (${fmt(1 / s.whisper_rtf, 0)}× real time)` : ""}</td>
+      <td class="num">${tk ? fmt(tk.mean_tps, 1) + `<div class="small muted">${fmt(tk.prompt_tokens, 0)} in / ${fmt(tk.output_tokens, 0)} out</div>` : "–"}</td>
+      <td class="num">${fmtBytes(r.peak_memory_bytes)}<div class="small muted">${esc(r.memory_note)}</div></td>
+      <td class="num">${r.assets_done}${r.assets_failed ? ` <span class="bad">(${r.assets_failed} failed)</span>` : ""}</td></tr>`;
+  }).join("");
+  const L = s.library;
+  let sum = 0;
+  const proj = Object.entries(s.projection).map(([m, p]) => { if (m !== "qwen3-vl-8b") sum += p.seconds; return `<tr><td>${LABEL[m] || esc(m)}</td>
+    <td class="small muted">${esc(p.basis)}</td><td class="num"><b>${fmtDuration(p.seconds)}</b></td></tr>`; }).join("");
+  document.getElementById("root").classList.remove("muted");
+  document.getElementById("root").innerHTML = `
+    <div class="panel"><table><tr><th>model</th><th>runtime / license</th><th class="num">on disk</th><th class="num">load</th>
+      <th>per-asset latency (warm)</th><th class="num">tok/s</th><th class="num">peak memory</th><th class="num">assets</th></tr>${runs}</table></div>
+    <h2>Projected first pass over the whole library</h2>
+    <div class="panel"><p>Library: <b>${L.total.toLocaleString()}</b> assets (not in trash; ${L.total_all.toLocaleString()} including trash): ${L.images.toLocaleString()} photos,
+      ${L.videos.toLocaleString()} videos, ${fmtDuration(L.video_seconds)} of video.</p>
+      <table><tr><th>stage</th><th>basis</th><th class="num">time</th></tr>${proj}
+      <tr><td><b>Total, production stack</b></td><td class="small muted">30B + SigLIP2 + Whisper + Q-Align, one after another (8B excluded; it's only here for comparison)</td>
+      <td class="num"><b>${fmtDuration(sum)}</b></td></tr></table>
+      <p class="small muted">That's about ${(sum / 3600 / 8).toFixed(0)} eight-hour nights, or ${(sum / 86400).toFixed(1)} days running flat out. Fetching originals from the other Mac over the network isn't included.</p></div>
+    <h2>Test set</h2><div class="panel small">${s.counts.assets} assets sampled, ${s.counts.failed} failed before the models ran
+      ${s.counts.failures.map((f) => `<div class="muted mono">${f.n} × ${esc(f.note)}</div>`).join("")}</div>`;
+}).catch((e) => (document.getElementById("root").textContent = "Error: " + e.message));
+</script></body></html>
