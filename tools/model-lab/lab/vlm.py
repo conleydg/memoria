@@ -173,7 +173,8 @@ def write_production(conn, uuid, version, o):
                      [(uuid, t, "qwen3-vl", version, now) for t in o["tags"]])
 
 
-LABELS = {"qwen3-vl:30b-a3b-instruct-q4_K_M": "qwen3-vl-30b", "qwen3-vl:8b-instruct-q4_K_M": "qwen3-vl-8b"}
+LABELS = {"qwen3-vl:30b-a3b-instruct-q4_K_M": "qwen3-vl-30b", "qwen3-vl:8b-instruct-q4_K_M": "qwen3-vl-8b",
+          "qwen3-vl:32b-instruct-q4_K_M": "qwen3-vl-32b"}
 
 if __name__ == "__main__":
     m = sys.argv[1]

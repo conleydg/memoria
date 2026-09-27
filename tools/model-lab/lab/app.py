@@ -29,8 +29,10 @@ app = FastAPI(title="memoria model lab", docs_url=None, redoc_url=None, openapi_
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 _local = threading.local()
-_siglip = {"model": None, "error": None, "load_seconds": None}
+_siglip: dict = {}   # key -> {"model", "error", "load_seconds"}
 _vec: dict = {}
+FTS_TABLES = {"30b": "search_fts", "8b": "search_fts_8b", "32b": "search_fts_32b"}
+VECTOR_MODELS = ("siglip2", "siglip2-giant")
 
 
 def db() -> sqlite3.Connection:
@@ -39,39 +41,62 @@ def db() -> sqlite3.Connection:
     return _local.conn
 
 
-def vec_index() -> searchlab.VectorIndex:
-    if "idx" not in _vec:
-        _vec["idx"] = searchlab.VectorIndex(db())
-    return _vec["idx"]
+def vec_index(model: str = "siglip2") -> searchlab.VectorIndex:
+    if model not in VECTOR_MODELS:
+        raise HTTPException(400, f"unknown vector model {model}")
+    if model not in _vec:
+        _vec[model] = searchlab.VectorIndex(db(), model)
+    return _vec[model]
 
 
-def _load_siglip():
-    try:
-        from .siglip import Siglip
-        s = Siglip()
-        _siglip["model"], _siglip["load_seconds"] = s, s.load_seconds
-    except Exception as e:  # noqa: BLE001
-        _siglip["error"] = f"{type(e).__name__}: {e}"
+def available_vector_models() -> list[str]:
+    have = {r[0] for r in db().execute("SELECT DISTINCT model FROM alt_embeddings")}
+    return ["siglip2"] + [m for m in VECTOR_MODELS[1:] if m in have]
+
+
+_load_lock = threading.Lock()
+
+
+def _load_siglip(key: str):
+    with _load_lock:
+        if key in _siglip:
+            return
+        _siglip[key] = {"model": None, "error": None, "load_seconds": None}
+        try:
+            from .siglip import Siglip
+            s = Siglip(key)
+            _siglip[key].update(model=s, load_seconds=s.load_seconds)
+        except Exception as e:  # noqa: BLE001
+            _siglip[key]["error"] = f"{type(e).__name__}: {e}"
 
 
 @app.on_event("startup")
 def _startup():
-    threading.Thread(target=_load_siglip, daemon=True).start()
+    threading.Thread(target=_load_siglip, args=("siglip2",), daemon=True).start()
 
 
-def embed_query(text: str) -> np.ndarray:
-    for _ in range(600):
-        if _siglip["model"] or _siglip["error"]:
+def embed_query(text: str, key: str = "siglip2") -> np.ndarray:
+    return embed_queries([text], key)[0]
+
+
+def embed_queries(texts: list[str], key: str = "siglip2") -> np.ndarray:
+    """The query text goes through the SAME model's text encoder as the
+    image vectors it's compared with - text and image vectors from
+    different models live in different spaces."""
+    if key not in _siglip:
+        _load_siglip(key)
+    for _ in range(1200):
+        if _siglip[key]["model"] or _siglip[key]["error"]:
             break
         time.sleep(0.1)
-    if not _siglip["model"]:
-        raise HTTPException(503, f"SigLIP2 text encoder not available: {_siglip['error']}")
-    return _siglip["model"].embed_texts([text])[0]
+    if not _siglip[key]["model"]:
+        raise HTTPException(503, f"{key} text encoder not available: {_siglip[key]['error']}")
+    return _siglip[key]["model"].embed_texts(texts)
 
 
 # ---------- pages ----------
 
-for page in ("index", "asset", "search", "map", "stats"):
+for page in ("index", "asset", "search", "map", "stats", "compare"):
     def _page(page=page):
         return FileResponse(STATIC / f"{page}.html")
     app.add_api_route("/" if page == "index" else f"/{page}", _page, include_in_schema=False)
@@ -162,21 +187,22 @@ def asset(uuid: str):
     return out
 
 
-def _run_search(q, min_sim=None, index="30b", mode="or", limit=50):
-    table = "search_fts_8b" if index == "8b" else "search_fts"
+def _run_search(q, min_sim=None, index="30b", mode="or", limit=50, vmodel="siglip2"):
+    table = FTS_TABLES.get(index, "search_fts")
     expr, kw = searchlab.keyword(db(), q, table=table, limit=limit, mode=mode)
-    vh = vec_index().search(embed_query(q), limit=limit, min_similarity=min_sim)
+    vh = vec_index(vmodel).search(embed_query(q, vmodel), limit=limit, min_similarity=min_sim)
     hy = searchlab.hybrid(kw, vh, min_similarity=min_sim, limit=limit)
     return expr, kw, vh, hy
 
 
 @app.get("/api/search")
-def search(q: str, min_sim: float | None = None, index: str = "30b", mode: str = "or", limit: int = 24):
+def search(q: str, min_sim: float | None = None, index: str = "30b", mode: str = "or", limit: int = 24,
+           vmodel: str = "siglip2"):
     t0 = time.time()
-    expr, kw, vh, hy = _run_search(q, min_sim, index, mode, limit=50)
+    expr, kw, vh, hy = _run_search(q, min_sim, index, mode, limit=50, vmodel=vmodel)
     ms = (time.time() - t0) * 1000
     ids = list({h["id"] for h in kw[:limit] + vh[:limit] + hy[:limit]})
-    return {"query": q, "fts_expression": expr, "rrf_k": searchlab.RRF_K, "ms": ms,
+    return {"query": q, "fts_expression": expr, "rrf_k": searchlab.RRF_K, "ms": ms, "vmodel": vmodel,
             "keyword": kw[:limit], "vector": vh[:limit], "hybrid": hy[:limit], "assets": _briefs(ids),
             "keyword_total": len(kw),
             "vector_above_threshold": sum(1 for h in vh if not h["below_threshold"]) if min_sim is not None else None}
@@ -190,7 +216,15 @@ def findability(uuid: str, min_sim: float | None = None):
     for q in qs:
         expr, kw, vh, hy = _run_search(q, min_sim, limit=total)
         hk = next((h for h in hy if h["id"] == uuid), None)
-        out.append({"query": q, "fts_expression": expr,
+        extra = {}
+        for k, table in _active_fts().items():
+            if k != "30b":
+                _, h = searchlab.keyword(db(), q, table=table, limit=total)
+                extra[f"keyword {k}"] = searchlab.rank_of(h, uuid)
+        for vm in available_vector_models()[1:]:
+            h = vec_index(vm).search(embed_query(q, vm), limit=total)
+            extra[f"vector {vm}"] = searchlab.rank_of(h, uuid)
+        out.append({"query": q, "fts_expression": expr, "extra": extra,
                     "keyword_rank": searchlab.rank_of(kw, uuid), "keyword_hits": len(kw),
                     "vector_rank": searchlab.rank_of(vh, uuid),
                     "vector_sim": next((h["score"] for h in vh if h["id"] == uuid), None),
@@ -199,9 +233,31 @@ def findability(uuid: str, min_sim: float | None = None):
     return {"rrf_k": searchlab.RRF_K, "total": total, "queries": out}
 
 
+def _active_fts():
+    return {k: t for k, t in FTS_TABLES.items() if db().execute(f"SELECT count(*) FROM {t}").fetchone()[0]}
+
+
+@app.get("/api/compare")
+def compare(refresh: bool = False):
+    from . import compare as cmp
+    c = db()
+    sig = [c.execute(q).fetchone()[0] for q in (
+        "SELECT count(*) FROM example_queries", "SELECT count(*) FROM embeddings",
+        "SELECT count(*) FROM alt_embeddings", "SELECT count(*) FROM vlm_results WHERE error IS NULL",
+        "SELECT count(*) FROM search_fts_32b")]
+    cache = DATA / "compare.json"
+    if cache.exists() and not refresh:
+        data = json.loads(cache.read_text())
+        if data.get("sig") == sig:
+            return data
+    data = cmp.compute(c, embed_queries, vec_index, _active_fts(), available_vector_models()) | {"sig": sig}
+    cache.write_text(json.dumps(data))
+    return data
+
+
 @app.get("/api/similar/{uuid}")
-def similar(uuid: str, limit: int = 12):
-    idx = vec_index()
+def similar(uuid: str, limit: int = 12, vmodel: str = "siglip2"):
+    idx = vec_index(vmodel)
     v = idx.vector(uuid)
     if v is None:
         return {"results": [], "assets": {}}
@@ -210,9 +266,9 @@ def similar(uuid: str, limit: int = 12):
 
 
 @app.get("/api/map")
-def embedding_map():
-    cache = DATA / "projection.json"
-    idx = vec_index()
+def embedding_map(vmodel: str = "siglip2"):
+    idx = vec_index(vmodel)
+    cache = DATA / ("projection.json" if vmodel == "siglip2" else f"projection-{vmodel}.json")
     if cache.exists():
         data = json.loads(cache.read_text())
         if data.get("n") == len(idx.ids):
@@ -245,6 +301,9 @@ def _library_totals():
             "images": images, "videos": videos, "video_seconds": vid_seconds}
     cache.write_text(json.dumps(data))
     return data
+
+
+PRODUCTION_MODELS = ["qwen3-vl-30b", "siglip2", "whisper", "q-align"]
 
 
 @app.get("/api/stats")
@@ -280,12 +339,16 @@ def stats():
               "failed": c.execute("SELECT count(*) FROM assets WHERE status='failed'").fetchone()[0],
               "failures": [dict(r) for r in c.execute("SELECT note, count(*) n FROM assets WHERE status='failed' GROUP BY note")]}
     return {"runs": runs, "per_asset": per, "tokens": tps, "whisper_rtf": whisper_rtf, "library": lib,
-            "projection": proj, "counts": counts, "siglip_query_load_seconds": _siglip["load_seconds"]}
+            "projection": proj, "counts": counts, "siglip_query_load_seconds": _siglip.get("siglip2", {}).get("load_seconds"),
+            "production": PRODUCTION_MODELS}
 
 
 @app.get("/api/status")
 def status():
-    return {"siglip_ready": bool(_siglip["model"]), "siglip_error": _siglip["error"]}
+    return {"vector_models": available_vector_models(),
+            "fts_indexes": [k for k, t in FTS_TABLES.items()
+                            if db().execute(f"SELECT count(*) FROM {t}").fetchone()[0]],
+            "loaded": {k: bool(v["model"]) for k, v in _siglip.items()}}
 
 
 @app.exception_handler(sqlite3.OperationalError)

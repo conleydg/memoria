@@ -18,7 +18,9 @@ document.getElementById("explain").innerHTML = explainer("speed, memory and the 
   writes about as fast as a 3B model while knowing more. It still needs memory for all 30B parameters.</p>
   <p><b>The projection</b> multiplies average per-asset time by your library's counts, running one model at a time. It's a rough
   first-pass estimate: no batching or parallelism, and videos are estimated from the test clips.</p>`);
-const LABEL = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-8b": "Qwen3-VL 8B", siglip2: "SigLIP2 so400m", whisper: "Whisper large-v3-turbo", "q-align": "Q-Align (OneAlign)" };
+const LABEL = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-8b": "Qwen3-VL 8B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", siglip2: "SigLIP2 so400m",
+  "siglip2-giant": "SigLIP2 giant", whisper: "Whisper large-v3-turbo", "q-align": "Q-Align (OneAlign)" };
+const SWAPS = [["qwen3-vl-32b", "qwen3-vl-30b"], ["siglip2-giant", "siglip2"], ["qwen3-vl-8b", "qwen3-vl-30b"]];
 api("/api/stats").then((s) => {
   const runs = s.runs.map((r) => {
     const p = s.per_asset[r.model] || {}, tk = s.tokens[r.model];
@@ -33,8 +35,14 @@ api("/api/stats").then((s) => {
   }).join("");
   const L = s.library;
   let sum = 0;
-  const proj = Object.entries(s.projection).map(([m, p]) => { if (m !== "qwen3-vl-8b") sum += p.seconds; return `<tr><td>${LABEL[m] || esc(m)}</td>
+  const prod = s.production || [];
+  const proj = Object.entries(s.projection).map(([m, p]) => { const inProd = prod.includes(m); if (inProd) sum += p.seconds;
+    return `<tr class="${inProd ? "" : "muted"}"><td>${LABEL[m] || esc(m)}${inProd ? "" : ' <span class="small">(comparison)</span>'}</td>
     <td class="small muted">${esc(p.basis)}</td><td class="num"><b>${fmtDuration(p.seconds)}</b></td></tr>`; }).join("");
+  const swaps = SWAPS.filter(([alt, base]) => s.projection[alt] && s.projection[base]).map(([alt, base]) => {
+    const d = s.projection[alt].seconds - s.projection[base].seconds;
+    return `<tr><td>Use ${LABEL[alt]} instead of ${LABEL[base]}</td><td class="num">${d >= 0 ? "+" : "−"}${fmtDuration(Math.abs(d))}</td>
+      <td class="num">total ${fmtDuration(sum + d)}</td></tr>`; }).join("");
   document.getElementById("root").classList.remove("muted");
   document.getElementById("root").innerHTML = `
     <div class="panel"><table><tr><th>model</th><th>runtime / license</th><th class="num">on disk</th><th class="num">load</th>
@@ -43,8 +51,9 @@ api("/api/stats").then((s) => {
     <div class="panel"><p>Library: <b>${L.total.toLocaleString()}</b> assets (not in trash; ${L.total_all.toLocaleString()} including trash): ${L.images.toLocaleString()} photos,
       ${L.videos.toLocaleString()} videos, ${fmtDuration(L.video_seconds)} of video.</p>
       <table><tr><th>stage</th><th>basis</th><th class="num">time</th></tr>${proj}
-      <tr><td><b>Total, production stack</b></td><td class="small muted">30B + SigLIP2 + Whisper + Q-Align, one after another (8B excluded; it's only here for comparison)</td>
+      <tr><td><b>Total, production stack</b></td><td class="small muted">${prod.map((m) => LABEL[m] || m).join(" + ")}, one after another. Comparison models are excluded.</td>
       <td class="num"><b>${fmtDuration(sum)}</b></td></tr></table>
+      ${swaps ? `<h3>What if we used a different model?</h3><table>${swaps}</table>` : ""}
       <p class="small muted">That's about ${(sum / 3600 / 8).toFixed(0)} eight-hour nights, or ${(sum / 86400).toFixed(1)} days running flat out. Fetching originals from the other Mac over the network isn't included.</p></div>
     <h2>Test set</h2><div class="panel small">${s.counts.assets} assets sampled, ${s.counts.failed} failed before the models ran
       ${s.counts.failures.map((f) => `<div class="muted mono">${f.n} × ${esc(f.note)}</div>`).join("")}</div>`;

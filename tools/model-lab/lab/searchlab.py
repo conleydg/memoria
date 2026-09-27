@@ -42,12 +42,19 @@ def keyword(conn, query: str, table="search_fts", limit=50, mode="or"):
 class VectorIndex:
     """All SigLIP2 vectors in one matrix, loaded once (ADR-0022)."""
 
-    def __init__(self, conn):
-        rows = conn.execute("SELECT asset_id, vector, model_version FROM embeddings").fetchall()
+    def __init__(self, conn, model: str = "siglip2"):
+        # Production vectors live in `embeddings`; comparison models in
+        # `alt_embeddings`. Each index only ever holds one model's vectors.
+        if model == "siglip2":
+            rows = conn.execute("SELECT asset_id, vector, model_version FROM embeddings").fetchall()
+        else:
+            rows = conn.execute("SELECT asset_id, vector, model_version FROM alt_embeddings WHERE model=?",
+                                (model,)).fetchall()
+        self.model = model
         self.ids = [r[0] for r in rows]
         self.pos = {i: n for n, i in enumerate(self.ids)}
         self.model_version = rows[0][2] if rows else None
-        m = np.stack([np.frombuffer(r[1], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 1152))
+        m = np.stack([np.frombuffer(r[1], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 1))
         self.matrix = m / (np.linalg.norm(m, axis=1, keepdims=True) + 1e-10)
 
     def search(self, qvec, limit=50, min_similarity=None, exclude=None):

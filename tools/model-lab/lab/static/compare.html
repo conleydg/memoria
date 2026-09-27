@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · Compare</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<h1>Compare models</h1>
+<div id="explain"></div>
+<div id="root" class="muted">Running the comparison (the first time takes up to a minute: every example query is searched every way)…</div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("/compare");
+document.getElementById("explain").innerHTML = explainer("a mini retrieval eval", `
+  <p>Every example query was written for one specific photo, so we can score each search setup by where that photo lands.
+  <b>Recall@k</b> is the share of queries where the right photo is in the top k. <b>MRR</b> (mean reciprocal rank) averages 1/rank:
+  rank 1 scores 1.0, rank 2 scores 0.5, rank 10 scores 0.1, not found scores 0. Higher is better on both.</p>
+  <p><b>Caveats.</b> The caption queries were written by the 8B model from the <i>30B's</i> caption, so keyword search over the 30B captions
+  has a built-in head start. Treat keyword rows as "how well does this index match 30B-style wording", not as a fair ranking of captioners.
+  The <b>vector</b> rows <i>are</i> a fair so400m-vs-giant comparison, because neither embedding model was involved in writing the queries. The honest
+  eval is ADR-0006's hand-checked ground truth, which this doesn't replace.</p>
+  <p><b>Name queries</b> (a person's name alone) test something only Photos' face recognition can supply. Expect vector search to fail them.</p>`);
+const pct = (x) => (x == null ? "–" : (x * 100).toFixed(0) + "%");
+const NAMES = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", "qwen3-vl-8b": "Qwen3-VL 8B" };
+function evalTable(g) {
+  const rows = Object.entries(g).sort((a, b) => b[1].mrr - a[1].mrr);
+  const best = rows[0]?.[1].mrr;
+  return `<table><tr><th>search setup</th><th class="num">R@1</th><th class="num">R@5</th><th class="num">R@10</th><th class="num">MRR</th><th style="width:30%"></th><th class="num">not found</th></tr>
+    ${rows.map(([m, x]) => `<tr><td class="${m.startsWith("keyword") ? "kw" : m.startsWith("vector") ? "vec" : "hy"}">${esc(m)}${m === "hybrid · 30b + siglip2" ? ' <span class="badge">production</span>' : ""}</td>
+      <td class="num">${pct(x.r1)}</td><td class="num">${pct(x.r5)}</td><td class="num">${pct(x.r10)}</td><td class="num"><b>${x.mrr.toFixed(3)}</b></td>
+      <td><div class="bar"><span style="width:${(x.mrr / best * 100).toFixed(0)}%"></span></div></td><td class="num muted">${pct(x.not_found)}</td></tr>`).join("")}</table>
+    <p class="small muted">${rows[0]?.[1].n} queries · ${Object.values(g)[0]?.n ? "" : ""}sorted by MRR</p>`;
+}
+api("/api/compare").then((d) => {
+  const cap = Object.entries(d.captions).map(([m, x]) => `<tr><td><b>${esc(NAMES[m] || m)}</b></td><td class="num">${x.n}</td>
+    <td class="num">${fmt(x.sec_image, 2)} s</td><td class="num">${fmt(x.sec_video, 2)} s</td><td class="num">${fmt(x.tps, 0)}</td>
+    <td class="num">${fmt(x.caption_chars, 0)}</td><td class="num">${fmt(x.tags, 1)}</td><td class="num">${pct(x.ocr_rate)}</td>
+    <td class="num">${x.tag_jaccard_vs_30b != null ? pct(x.tag_jaccard_vs_30b) : "–"}</td></tr>`).join("");
+  const r = d.retrieval;
+  document.getElementById("root").classList.remove("muted");
+  document.getElementById("root").innerHTML = `
+    <h2>Captioners side by side</h2>
+    <div class="panel"><table><tr><th>model</th><th class="num">assets</th><th class="num">per photo</th><th class="num">per video</th><th class="num">tok/s</th>
+      <th class="num">caption length (chars)</th><th class="num">tags</th><th class="num">found text (OCR)</th><th class="num">tag overlap with 30B</th></tr>${cap}</table>
+      <p class="small muted">Tag overlap is the Jaccard index: shared tags ÷ all distinct tags, averaged over assets. Longer isn't automatically better.
+      Open a few asset pages to judge whether the extra detail would help your searches.</p></div>
+    <h2>Caption-derived queries</h2><div class="panel">${r.caption ? evalTable(r.caption) : "none"}</div>
+    ${r.name ? `<h2>Name-only queries</h2><div class="panel">${evalTable(r.name)}
+      <p class="small muted">Names come only from Photos (ADR-0015). Keyword rows can't rank photos of the same person above each other, so R@1 is capped
+      whenever someone appears in several test photos.</p></div>` : ""}
+    <p class="small muted">Computed in ${d.seconds.toFixed(0)} s over vector models: ${d.vector_models.join(", ")}; keyword indexes: ${d.fts_indexes.join(", ")}.
+      <a href="#" id="refresh">recompute</a></p>`;
+  document.getElementById("refresh").onclick = (e) => { e.preventDefault(); document.getElementById("root").innerHTML = "Recomputing…"; fetch("/api/compare?refresh=true").then(() => location.reload()); };
+}).catch((e) => (document.getElementById("root").textContent = "Error: " + e.message));
+</script></body></html>

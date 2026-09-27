@@ -19,10 +19,12 @@ document.getElementById("explain").innerHTML = explainer("one asset, every model
 const id = new URLSearchParams(location.search).get("id");
 const root = document.getElementById("root");
 
-function vlmCol(v, other, name) {
+const VLM_NAMES = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", "qwen3-vl-8b": "Qwen3-VL 8B" };
+function vlmCol(v, others, name) {
   if (!v) return `<div class="panel"><h3>${name}</h3><p class="muted">no result</p></div>`;
   if (v.error) return `<div class="panel"><h3>${name}</h3><p class="bad">error: ${esc(v.error)}</p></div>`;
-  const shared = new Set(other?.tags || []);
+  // green = every other model also produced this tag
+  const shared = new Set(v.tags.filter((t) => others.every((o) => o?.tags?.includes(t))));
   return `<div class="panel"><h3>${name} <span class="muted small mono">${esc(v.model_version)}</span></h3>
     <p>${esc(v.caption)}</p>
     <div class="tags">${v.tags.map((t) => `<span class="tag ${shared.has(t) ? "shared" : ""}">${esc(t)}</span>`).join("")}</div>
@@ -38,6 +40,7 @@ function fmtT(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floo
 async function load() {
   const a = await api(`/api/asset/${id}`);
   document.title = `Model lab · ${fmtDate(a.date)}`;
+  const vlmKeys = ["qwen3-vl-30b", "qwen3-vl-32b", "qwen3-vl-8b"].filter((k) => a.vlm[k]);
   const media = a.kind === "video"
     ? `<video id="vid" controls preload="metadata" src="/media/${id}/video.mp4" poster="/media/${id}/thumb.jpg"></video>
        <div class="frames">${[0, 1, 2, 3].map((i) => `<img src="/media/${id}/f${i}.jpg" title="keyframe ${i + 1} (sent to the VLMs and SigLIP2)">`).join("")}</div>
@@ -84,17 +87,19 @@ async function load() {
         <div class="panel" style="margin-top:12px"><h3>Timings for this asset</h3><table>${timeRows}</table></div>
       </div>
     </div>
-    <h2>Caption and tags: 30B vs 8B, same prompt</h2>
-    <p class="small muted">Tags with a green outline were produced by both models.</p>
-    <div class="cols two">${vlmCol(a.vlm["qwen3-vl-30b"], a.vlm["qwen3-vl-8b"], "Qwen3-VL 30B-A3B")}${vlmCol(a.vlm["qwen3-vl-8b"], a.vlm["qwen3-vl-30b"], "Qwen3-VL 8B")}</div>
+    <h2>Caption and tags: same prompt, ${vlmKeys.length} models</h2>
+    <p class="small muted">Tags with a green outline were produced by every model. The 30B-A3B is the production candidate. The 32B is dense
+    (all 32B parameters work on every token), so it's slower. The 8B is the small option.</p>
+    <div class="cols ${vlmKeys.length === 3 ? "three" : "two"}">${vlmKeys.map((k) => vlmCol(a.vlm[k], vlmKeys.filter((o) => o !== k).map((o) => a.vlm[o]), VLM_NAMES[k] || k)).join("")}</div>
     ${a.kind === "video" ? `<h2>Transcript (Whisper large-v3-turbo)</h2><div class="panel">
       ${a.has_audio ? (a.segments.length ? `<p class="small muted">Language: ${esc(a.transcript_meta?.language)} ·
         ${a.transcript_meta?.has_speech ? "speech detected" : "no confident speech. Faded segments are probably Whisper filling silence or noise with invented words, which is why they're kept out of search."}
         · click a timestamp to jump</p>${segs}` : `<p class="muted">No segments.</p>`) : `<p class="muted">This video has no audio track.</p>`}</div>` : ""}
     <h2>How could this be found?</h2>
     <div id="find" class="panel muted">Running searches…</div>
-    <h2>More like this <span class="small muted">(nearest SigLIP2 vectors)</span></h2>
-    <div id="similar" class="grid"></div>`;
+    <h2>More like this <span class="small muted">(nearest SigLIP2 vectors)</span>
+      <select id="sim-model" class="small" style="margin-left:10px"><option value="siglip2">so400m (production)</option></select></h2>
+    <div id="simnote"></div><div id="similar" class="grid"></div>`;
   document.querySelectorAll(".seg .t").forEach((el) => el.addEventListener("click", () => {
     const v = document.getElementById("vid"); v.currentTime = parseFloat(el.dataset.t); v.play();
   }));
@@ -115,28 +120,37 @@ async function loadFind() {
       <td class="rankcell kw">${rk(q.keyword_rank)}<div class="small muted">${q.keyword_hits} matched</div></td>
       <td class="rankcell vec">${rk(q.vector_rank)}<div class="small muted">cos ${fmt(q.vector_sim, 3)}</div></td>
       <td class="rankcell hy">${rk(q.hybrid_rank)}<div class="small">${math}</div></td>
+      <td class="rankcell small">${Object.entries(q.extra || {}).map(([m, r]) => `${esc(m)}: ${rk(r)}`).join("<br>") || "–"}</td>
       <td><a href="/search?q=${encodeURIComponent(q.query)}">open in playground →</a></td></tr>`;
   }).join("");
   el.classList.remove("muted");
   el.innerHTML = `<p class="small">Four queries someone might type to find this item, written by the 8B model from the 30B caption, plus each named person's name on its own.
     Watch the name rows: keyword finds them (the name comes from Photos), but vector search can't, because SigLIP2 has never seen your family.
     For each one, this is where the item ranks among all ${f.total} test assets. #1 is best. They come from the caption, so they tend to favour keyword search.</p>
-    <table><tr><th>query</th><th class="kw">keyword (FTS5)</th><th class="vec">vector (SigLIP2)</th><th class="hy">hybrid (RRF) and the math</th><th></th></tr>${rows}</table>
+    <table><tr><th>query</th><th class="kw">keyword (FTS5)</th><th class="vec">vector (SigLIP2)</th><th class="hy">hybrid (RRF) and the math</th><th>other models</th><th></th></tr>${rows}</table>
     <p class="small muted">Reciprocal Rank Fusion ignores raw scores. BM25 and cosine similarity aren't on comparable scales, so RRF uses
     only each method's rank: score = Σ 1/(k + rank), with k = ${k}. An item ranked well by both methods beats one ranked #1 by just one.</p>`;
 }
 
 async function loadSimilar() {
-  const s = await api(`/api/similar/${id}`);
+  const sel = document.getElementById("sim-model");
+  if (sel.options.length === 1) {
+    const st = await api("/api/status");
+    st.vector_models.slice(1).forEach((m) => sel.insertAdjacentHTML("beforeend", `<option value="${m}">${esc(m.replace("siglip2-", ""))} (comparison)</option>`));
+    sel.addEventListener("input", loadSimilar);
+  }
+  const s = await api(`/api/similar/${id}?vmodel=${sel.value}`);
   // Rough bands from this test set (burst pairs score ~0.99; the median
   // photo's nearest neighbour ~0.78). Not calibrated - see ADR-0026.
   const band = (x) => (x >= 0.9 ? "near-duplicate" : x >= 0.8 ? "similar" : "loosely related");
   const close = s.results.filter((h) => h.score >= 0.8).length;
   document.getElementById("similar").innerHTML = s.results.map((h) => card(s.assets[h.id],
     { score: h.score.toFixed(3), dim: h.score < 0.8, title: `cosine ${h.score.toFixed(3)}: ${band(h.score)}` })).join("");
-  document.getElementById("similar").insertAdjacentHTML("beforebegin", `<p class="small muted">${close ? `${close} close match(es) (cosine ≥ 0.8).` : "No close matches in the test set."}
+  document.getElementById("simnote").innerHTML = (`<p class="small muted">${close ? `${close} close match(es) (cosine ≥ 0.8).` : "No close matches in the test set."}
     Faded = below 0.8, meaning just the least different of the test set, not a real match. Like vector search, "more like this" always returns
-    something (ADR-0026). Random-sample items often have no true neighbour here. Items sampled as "event" do; try one of those.</p>`);
+    something (ADR-0026). Random-sample items often have no true neighbour here. Items sampled as "event" do; try one of those.</p>` +
+    (sel.value !== "siglip2" ? `<p class="small warn">The 0.8/0.9 bands were set from so400m's scores. Similarity numbers aren't comparable across models:
+    each model has its own vector space and its own typical score range (ADR-0019). Compare the <i>ranking</i> across models, not the numbers.</p>` : ""));
 }
 load().catch((e) => (root.textContent = "Error: " + e.message));
 </script></body></html>

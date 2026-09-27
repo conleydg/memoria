@@ -7,6 +7,7 @@
 <form id="form" class="filters panel">
   <input id="q" type="search" placeholder="e.g. dog at the beach, birthday cake, receipt" style="flex:1;min-width:260px" autofocus>
   <label>Keyword index <select id="index"><option value="30b">30B captions</option><option value="8b">8B captions</option></select></label>
+  <label>Vector model <select id="vmodel"><option value="siglip2">SigLIP2 so400m</option></select></label>
   <label>Words <select id="mode"><option value="or">any word (OR)</option><option value="and">all words (AND)</option></select></label>
   <label title="ADR-0026: vector hits below this cosine similarity are treated as 'no confident match'">
     Min similarity <input id="min" type="range" min="0" max="0.3" step="0.005" value="0"><span id="minv" class="mono">off</span></label>
@@ -28,6 +29,9 @@ document.getElementById("explain").innerHTML = explainer("keyword vs vector vs h
   <p><b>Minimum similarity (ADR-0026)</b> is the fix for that: vector hits below the threshold are dropped (faded here) instead of padding the
   list. SigLIP2 query-to-image similarities are small numbers (often 0.05–0.2), so try a query for something you've never photographed and see
   where the top score lands. That's how the threshold gets calibrated.</p>
+  <p><b>Switching models</b> shows how much the model matters. The keyword index is only as good as the captions a VLM wrote, and
+  vector results depend entirely on which embedding model made the vectors. The first query on the giant model loads its text encoder (a few seconds).
+  Its similarity numbers run on a different scale from so400m's, so a threshold tuned for one doesn't carry over.</p>
   <p><b>Hybrid (RRF)</b> fuses the two rankings using only rank positions: Σ 1/(60 + rank). Items both methods like float to the top,
   covering each method's blind spots (ADR-0010).</p>`);
 const $ = (id) => document.getElementById(id);
@@ -47,7 +51,7 @@ async function run(e) {
   history.replaceState(null, "", "?q=" + encodeURIComponent(q));
   const min = parseFloat($("min").value);
   $("info").textContent = "searching… (the first query loads SigLIP2's text encoder)";
-  const url = `/api/search?q=${encodeURIComponent(q)}&index=${$("index").value}&mode=${$("mode").value}` + (min ? `&min_sim=${min}` : "");
+  const url = `/api/search?q=${encodeURIComponent(q)}&index=${$("index").value}&mode=${$("mode").value}&vmodel=${$("vmodel").value}` + (min ? `&min_sim=${min}` : "");
   try {
     const r = await api(url);
     $("info").textContent = `${r.ms.toFixed(0)} ms · FTS5 expression: ${r.fts_expression || "(no searchable words)"}`;
@@ -56,12 +60,16 @@ async function run(e) {
     const topSim = r.vector[0]?.score;
     $("out").innerHTML = `<div class="cols three">
       ${col("Keyword · FTS5", "kw", r.keyword, r.assets, (h) => h.score.toFixed(2), `${r.keyword_total} item(s) contain the words. Score = BM25 (higher is better).`)}
-      ${col("Vector · SigLIP2", "vec", r.vector, r.assets, (h) => h.score.toFixed(3),
+      ${col("Vector · " + ($("vmodel").value === "siglip2" ? "SigLIP2 so400m" : "SigLIP2 giant"), "vec", r.vector, r.assets, (h) => h.score.toFixed(3),
         `Cosine similarity. Top score ${fmt(topSim, 3)}.` + (r.vector_above_threshold != null ? ` ${r.vector_above_threshold} above the threshold; faded = below it.` : " Always returns something."))}
       ${col("Hybrid · RRF", "hy", r.hybrid, r.assets, (h) => h.score.toFixed(4), `Σ 1/(${k} + rank). Hover a result to see its math.`)}
     </div>`;
   } catch (err) { $("info").textContent = "Error: " + err.message; }
 }
 $("form").addEventListener("submit", run);
-if ($("q").value) run();
+api("/api/status").then((st) => {
+  if (st.fts_indexes.includes("32b")) $("index").insertAdjacentHTML("beforeend", `<option value="32b">32B captions</option>`);
+  st.vector_models.slice(1).forEach((m) => $("vmodel").insertAdjacentHTML("beforeend", `<option value="${m}">SigLIP2 ${esc(m.replace("siglip2-", ""))}</option>`));
+  ["index", "vmodel"].forEach((id) => $(id).addEventListener("input", () => $("q").value && run()));
+}).finally(() => { if ($("q").value) run(); });
 </script></body></html>

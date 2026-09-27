@@ -6,7 +6,7 @@ example queries.
 
 search_fts (memoria's table) = 30B caption + tags + OCR + transcript
                                + named people (from Photos, lab.people).
-search_fts_8b                = the same, from the 8B model's output.
+search_fts_8b / search_fts_32b = the same, from the 8B / 32B output.
 
 Example queries are written by the 8B model from the 30B caption and
 tags, phrased the way a person would search their own library. They are
@@ -36,7 +36,8 @@ QSCHEMA = {"type": "object", "properties": {"queries": {"type": "array", "items"
 
 
 def rebuild_fts(conn):
-    for table, model in (("search_fts", "qwen3-vl-30b"), ("search_fts_8b", "qwen3-vl-8b")):
+    for table, model in (("search_fts", "qwen3-vl-30b"), ("search_fts_8b", "qwen3-vl-8b"),
+                         ("search_fts_32b", "qwen3-vl-32b")):
         conn.execute(f"DELETE FROM {table}")
         rows = conn.execute(
             "SELECT v.asset_id, v.caption, v.tags, v.ocr_text, t.text, "

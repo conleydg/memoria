@@ -5,6 +5,7 @@
 <h1>Embedding map</h1>
 <div id="explain"></div>
 <div class="filters panel">
+  <label>Model <select id="vmodel"><option value="siglip2">SigLIP2 so400m</option></select></label>
   <label>Projection <select id="proj"><option value="umap">UMAP</option><option value="pca">PCA</option></select></label>
   <label>Color by <select id="color"><option value="label">zero-shot label</option><option value="year">year</option><option value="kind">type</option><option value="aesthetic">aesthetic</option></select></label>
   <label><input type="checkbox" id="thumbs"> show thumbnails</label>
@@ -22,7 +23,9 @@ document.getElementById("explain").innerHTML = explainer("squashing 1,152 dimens
   a <b>projection</b> squashes them to 2. <b>PCA</b> keeps the two directions with the most variation (straight-line, faithful but blurry).
   <b>UMAP</b> tries to keep each item's nearest neighbours near it (good at showing clusters, but distances between clusters aren't meaningful).</p>
   <p>Look for clusters: screenshots and documents usually sit far from real-world photos, pets and people form groups, and
-  near-duplicates land on top of each other. Hover to see what's there, click to open it.</p>`);
+  near-duplicates land on top of each other. Hover to see what's there, click to open it.</p>
+  <p>Switch <b>Model</b> to see how a different embedding model arranges the same photos. The layout changes completely, because each model
+  has its own space. The question is whether the <i>groupings</i> look more sensible.</p>`);
 const $ = (id) => document.getElementById(id);
 const cv = $("c"), ctx = cv.getContext("2d"), tip = $("tooltip");
 let data, pts = [], imgs = {};
@@ -74,6 +77,11 @@ cv.addEventListener("mouseleave", () => (tip.style.display = "none"));
 cv.addEventListener("click", (e) => { const p = nearest(e); if (p) location.href = `/asset?id=${p.id}`; });
 ["proj", "color", "thumbs"].forEach((id) => $(id).addEventListener("input", draw));
 addEventListener("resize", draw);
-$("note").textContent = "Computing projection (first load runs UMAP, a few seconds)…";
-api("/api/map").then((d) => { data = d; draw(); }).catch((e) => ($("note").textContent = "Error: " + e.message));
+function loadMap() {
+  $("note").textContent = "Computing projection (first load runs UMAP, a few seconds)…";
+  api(`/api/map?vmodel=${$("vmodel").value}`).then((d) => { data = d; draw(); }).catch((e) => ($("note").textContent = "Error: " + e.message));
+}
+$("vmodel").addEventListener("input", loadMap);
+api("/api/status").then((st) => st.vector_models.slice(1).forEach((m) =>
+  $("vmodel").insertAdjacentHTML("beforeend", `<option value="${m}">SigLIP2 ${esc(m.replace("siglip2-", ""))}</option>`))).finally(loadMap);
 </script></body></html>
