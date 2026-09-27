@@ -5,7 +5,10 @@ generation, a first cut at ADR-0005's query layer).
    question (matched against Photos' named people, ADR-0015) and/or a
    4-digit year narrows the candidate set with plain SQL.
 2. Retrieve: hybrid search (FTS5 over the 30B captions + SigLIP2 vectors,
-   RRF) over those candidates, top-k.
+   RRF) over those candidates, top-k (k = 5-60, default 20). A bigger k
+   helps questions that need many items ("every beach trip") but costs
+   time, memory, and some precision: more loosely related items for the
+   model to wade through.
 3. Generate: the 8B model reads only those items' metadata (date, people,
    caption, tags, OCR, transcript) and answers, citing items as [n]. It
    never sees pixels here, and it is told to say so when the context
@@ -89,7 +92,7 @@ def item_context(conn, uuid, n):
     return "\n".join(lines)
 
 
-def answer(conn, question, embed_query, vec_index, facts="", model="8b", k=10):
+def answer(conn, question, embed_query, vec_index, facts="", model="8b", k=20):
     t0 = time.time()
     people, years = detect_filters(conn, question)
     cand = candidates(conn, people, years)
@@ -108,7 +111,10 @@ def answer(conn, question, embed_query, vec_index, facts="", model="8b", k=10):
     t1 = time.time()
     body = requests.post(f"{OLLAMA}/api/chat", timeout=300, json={
         "model": MODELS[model], "stream": False, "keep_alive": "10m",
-        "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "seed": 1},
+        # Each item is ~100-400 tokens of text, so the context window has
+        # to grow with k (a bigger window also takes more memory).
+        "options": {"temperature": 0.2, "num_ctx": 8192 if k <= 15 else 16384 if k <= 30 else 32768,
+                    "num_predict": 600, "seed": 1},
         "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
     }).json()
     text = body.get("message", {}).get("content", "") or body.get("error", "")

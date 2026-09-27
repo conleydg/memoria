@@ -13,6 +13,8 @@
       <button type="button" data-m="30b" style="border:0;border-radius:0">30B-A3B</button>
     </span>
     <input type="hidden" id="model" value="8b">
+    <label class="small muted" title="How many search results the model reads before answering">Items to read
+      <select id="k"><option>5</option><option>10</option><option selected>20</option><option>40</option><option>60</option></select></label>
     <button class="primary" id="go">Ask</button>
   </div>
   <details style="margin-top:10px"><summary class="small">Facts the model can use (e.g. birthdays). Kept in this browser only.</summary>
@@ -29,12 +31,16 @@ document.getElementById("explain").innerHTML = explainer("retrieval-augmented ge
   <p>A language model doesn't know anything about your photos. It only knows what's put in front of it. So answering a question takes three steps,
   and this page shows every one:</p>
   <p><b>1. Filter.</b> If you name someone Photos knows, or a year, the candidates are narrowed first with plain SQL (ADR-0022).
-  <b>2. Retrieve.</b> Hybrid search (keyword + SigLIP2 vector, fused with RRF) picks the 10 most relevant items. That's the "R".
+  <b>2. Retrieve.</b> Hybrid search (keyword + SigLIP2 vector, fused with RRF) picks the most relevant items (20 by default, adjustable). That's the "R".
   <b>3. Generate.</b> The model reads just those 10 items' <i>text</i> (date, people, caption, tags, text-in-image, speech transcript) and writes an
   answer, citing items as [1], [2]. That's the "AG". It never sees the pixels here.</p>
   <p><b>Why answers can be wrong:</b> if retrieval misses the right photo, the model can't mention it. If a caption is wrong, the answer inherits the
   mistake. And models sometimes "hallucinate", filling gaps with plausible inventions. The prompt forbids guessing and demands citations,
   so you can check every claim against the photo. Ages need a birthday in the Facts box, because Photos doesn't store them.</p>
+  <p><b>Why not give it everything?</b> The model can only read so much at once (its "context window"). Every item costs tokens, and more
+  tokens means slower answers and more memory. Mostly-irrelevant items also make answers worse: models get distracted and tend to overlook
+  things buried in the middle of a long list. So retrieval is a filter: find the few items worth reading. Use more items for "list all" or
+  "how many" questions. Filtering by a person's name or a year happens first, so everything matching those is in the pool.</p>
   <p>The <b>8B</b> is the default: it's reading text, not photos, so the 30B's extra knowledge helps less, and the 8B is faster and light enough to run
   while indexing. This page only searches the ~300 test items, not the whole library yet.</p>`);
 const $ = (id) => document.getElementById(id);
@@ -55,7 +61,7 @@ $("form").addEventListener("submit", async (e) => {
   $("out").innerHTML = `<p class="muted">Searching, then asking the model… (the first question loads it, a few seconds)</p>`;
   try {
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q, facts: $("facts").value, model: $("model").value }) });
+      body: JSON.stringify({ question: q, facts: $("facts").value, model: $("model").value, k: parseInt($("k").value) }) });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const d = await r.json();
     const n2id = Object.fromEntries(d.items.map((i) => [i.n, i.id]));
@@ -65,7 +71,7 @@ $("form").addEventListener("submit", async (e) => {
       <div class="panel"><h3>Answer</h3><p style="font-size:15px">${renderAnswer(d.answer, n2id)}</p>
         <p class="small muted">${esc(d.model)} · retrieval ${(t.retrieve_s * 1000).toFixed(0)} ms · generation ${t.generate_s.toFixed(1)} s
         ${t.load_s > 0.5 ? `(incl. ${t.load_s.toFixed(1)} s loading the model)` : ""} · ${t.prompt_tokens} tokens read, ${t.output_tokens} written</p></div>
-      <h2>What the model was given <span class="small muted">${filt ? `filtered first by ${filt} → ${f.candidates} candidate(s), then` : ""} top ${d.items.length} by hybrid search</span></h2>
+      <h2>What the model was given <span class="small muted">${filt ? `filtered first by ${filt} → ${f.candidates} candidate(s), then` : ""} top ${d.items.length} by hybrid search · ${t.prompt_tokens} tokens of context</span></h2>
       <p class="small muted">Numbered as the model saw them. Outlined = cited in the answer.</p>
       <div class="grid">${d.items.map((i) => {
         const a = d.assets[i.id]; const cited = d.cited.includes(i.n);

@@ -283,6 +283,7 @@ class AskRequest(BaseModel):
     question: str
     facts: str = ""
     model: str = "8b"
+    k: int = 20
 
 
 @app.post("/api/ask")
@@ -292,7 +293,7 @@ def ask(req: AskRequest):
     from . import ask as ask_mod
     if req.model not in ask_mod.MODELS:
         raise HTTPException(400, "model must be 8b or 30b")
-    out = ask_mod.answer(db(), req.question, embed_query, vec_index, req.facts, req.model)
+    out = ask_mod.answer(db(), req.question, embed_query, vec_index, req.facts, req.model, k=max(5, min(60, req.k)))
     return out | {"assets": _briefs([i["id"] for i in out["items"]])}
 
 
