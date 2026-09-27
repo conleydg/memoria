@@ -2,7 +2,15 @@
 Photos.sqlite snapshot into the lab store. No model involved: every value
 here comes from Photos' own on-device analysis and metadata.
 
-    python -m lab.people
+    python -m lab.people [path/to/Photos.sqlite snapshot to take names from]
+
+The lab's assets are keyed by ZUUID from the library Mac's snapshot
+(data/Photos.sqlite), but ZUUID is per-library: the same photo has a
+different ZUUID in another Mac's library. When names come from a
+different library (e.g. this Mac's own, where names were added), assets
+are matched across libraries by ZCLOUDASSETGUID, the iCloud ID that
+every synced copy of a photo shares. Person keys (ZPERSONUUID) are also
+per-library, so asset_people keys follow the library the names came from.
 
 - People: named people only (ADR-0015: identity comes from Photos' own
   face clustering, never from our models). Keyed by ZPERSONUUID, the
@@ -20,6 +28,7 @@ Names end up in search_fts via lab.index, so a query like
 """
 
 import sqlite3
+import sys
 import time
 
 from .store import ROOT, connect
@@ -27,6 +36,14 @@ from .store import ROOT, connect
 PHOTOS_DB = ROOT / "data" / "Photos.sqlite"
 LAB_COLUMNS = {"tz_offset": "INTEGER", "tz_name": "TEXT", "latitude": "REAL", "longitude": "REAL",
                "face_count": "INTEGER", "unnamed_face_count": "INTEGER"}
+
+
+def face_columns(photos) -> tuple[str, str]:
+    """Photos renamed ZDETECTEDFACE's foreign keys across macOS versions
+    (ZASSET/ZPERSON on older libraries, ZASSETFORFACE/ZPERSONFORFACE on
+    newer ones). Returns (asset_col, person_col) for this snapshot."""
+    cols = {r[1] for r in photos.execute("PRAGMA table_info(ZDETECTEDFACE)")}
+    return ("ZASSETFORFACE", "ZPERSONFORFACE") if "ZASSETFORFACE" in cols else ("ZASSET", "ZPERSON")
 
 
 def ensure_columns(conn):
@@ -39,16 +56,24 @@ def ensure_columns(conn):
 def main():
     conn = connect()
     ensure_columns(conn)
-    photos = sqlite3.connect(f"file:{PHOTOS_DB}?mode=ro", uri=True)
+    photos_db = sys.argv[1] if len(sys.argv) > 1 else PHOTOS_DB
+    photos = sqlite3.connect(f"file:{photos_db}?mode=ro", uri=True)
+    fa, fp = face_columns(photos)
     ids = [r[0] for r in conn.execute("SELECT uuid FROM assets")]
+    source = sqlite3.connect(f"file:{PHOTOS_DB}?mode=ro", uri=True)
+    guid_of = dict(source.execute("SELECT ZUUID, ZCLOUDASSETGUID FROM ZASSET"))
+    via_guid = missing = 0
     now = time.time()
     people_rows = located = 0
     for uuid in ids:
-        meta = photos.execute(
-            "SELECT a.Z_PK, aa.ZTIMEZONEOFFSET, aa.ZTIMEZONENAME, a.ZLATITUDE, a.ZLONGITUDE "
-            "FROM ZASSET a LEFT JOIN ZADDITIONALASSETATTRIBUTES aa ON aa.ZASSET = a.Z_PK WHERE a.ZUUID = ?",
-            (uuid,)).fetchone()
+        sql = ("SELECT a.Z_PK, aa.ZTIMEZONEOFFSET, aa.ZTIMEZONENAME, a.ZLATITUDE, a.ZLONGITUDE "
+               "FROM ZASSET a LEFT JOIN ZADDITIONALASSETATTRIBUTES aa ON aa.ZASSET = a.Z_PK WHERE a.")
+        meta = photos.execute(sql + "ZUUID = ?", (uuid,)).fetchone()
+        if not meta and guid_of.get(uuid):
+            meta = photos.execute(sql + "ZCLOUDASSETGUID = ? AND a.ZTRASHEDSTATE = 0", (guid_of[uuid],)).fetchone()
+            via_guid += bool(meta)
         if not meta:
+            missing += 1
             continue
         pk, tz_offset, tz_name, lat, lon = meta
         # Photos uses -180/-180 (and sometimes 0/0) for "no location".
@@ -56,8 +81,8 @@ def main():
             lat = lon = None
         faces = photos.execute(
             "SELECT p.ZPERSONUUID, COALESCE(NULLIF(p.ZFULLNAME, ''), NULLIF(p.ZDISPLAYNAME, '')) "
-            "FROM ZDETECTEDFACE f LEFT JOIN ZPERSON p ON p.Z_PK = f.ZPERSON "
-            "WHERE f.ZASSET = ? AND f.ZDETECTIONTYPE = 1 AND COALESCE(f.ZHIDDEN, 0) = 0", (pk,)).fetchall()
+            f"FROM ZDETECTEDFACE f LEFT JOIN ZPERSON p ON p.Z_PK = f.{fp} "
+            f"WHERE f.{fa} = ? AND f.ZDETECTIONTYPE = 1 AND COALESCE(f.ZHIDDEN, 0) = 0", (pk,)).fetchall()
         named = {key: name for key, name in faces if key and name}
         conn.execute("UPDATE lab_assets SET tz_offset=?, tz_name=?, latitude=?, longitude=?, face_count=?, "
                      "unnamed_face_count=? WHERE uuid=?",
@@ -73,7 +98,8 @@ def main():
     with_faces = conn.execute("SELECT count(*) FROM lab_assets WHERE face_count > 0").fetchone()[0]
     with_tz = conn.execute("SELECT count(*) FROM lab_assets WHERE tz_offset IS NOT NULL").fetchone()[0]
     print(f"people: {people_rows} asset-person links, {distinct} distinct people, on {with_people} assets; "
-          f"{with_faces} assets have faces; {located} with GPS; {with_tz} with a time zone offset")
+          f"{with_faces} assets have faces; {located} with GPS; {with_tz} with a time zone offset; "
+          f"{via_guid} matched by iCloud ID, {missing} not found in this library (kept their previous values)")
 
 
 if __name__ == "__main__":
