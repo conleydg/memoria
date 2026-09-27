@@ -69,15 +69,17 @@ def main():
     lm_weights = [(k, v) for k, v in original.items()
                   if k.startswith("language_model") and k.endswith(".weight") and v.ndim == 2]
     for level in args.noise:
-        noisy = []
+        # One matrix at a time, in the weights' own bf16, evaluated right
+        # away: building float32 copies of all 8B weights at once needs
+        # ~4x the model's memory and runs out on a 64 GB Mac.
         for k, w in lm_weights:
-            std = mx.std(w.astype(mx.float32))
-            noisy.append((k, (w.astype(mx.float32) + level * std * mx.random.normal(w.shape)).astype(w.dtype)))
-        model.load_weights(noisy, strict=False)
-        mx.eval(model.parameters())
+            std = mx.std(w.astype(mx.float32)).astype(w.dtype)
+            nw = w + level * std * mx.random.normal(w.shape, dtype=w.dtype)
+            mx.eval(nw)
+            model.load_weights([(k, nw)], strict=False)
         experiments.append(run(f"noise {level:.1%}", f"every language-model matrix += {level:.1%} x its std x random"))
-        del noisy
         restore(model, original)
+        mx.clear_cache()
 
     # 2. Knock out single layers' MLP.
     for i in ablate:

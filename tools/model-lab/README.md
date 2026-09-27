@@ -16,6 +16,8 @@ Pages:
 - **Search playground**: keyword, vector and hybrid results side by side, with a min-similarity slider (ADR-0026) and switches for the keyword index (30B, 8B or 32B captions) and the vector model (SigLIP2 so400m or giant).
 - **Embedding map**: UMAP or PCA of the SigLIP2 vectors, colored by label, year, type or aesthetic score.
 - **Compare models**: an automatic retrieval eval (Recall@k and MRR for every keyword index, vector model and hybrid pair) plus caption stats per VLM.
+- **Ask**: question answering over the test set (filter by person/year → hybrid retrieval → the 8B or 30B answers from the retrieved items, with citations).
+- **MLX hands-on**: four exercises that load Qwen3-VL 8B directly with MLX (see `mlx_handson/`).
 - **Model stats**: load time, latency, tok/s, peak memory, and the projected full-library first pass.
 
 ## Re-run the pipeline
@@ -46,3 +48,6 @@ tools/model-lab/.venv-qalign/bin/pip install "transformers==4.36.1" torch "accel
 - Names come only from Photos (ADR-0015). On name-only queries, keyword search puts the tagged photo in the top 10 far more often than vector search does, because SigLIP2 has never seen these people.
 - Larger models (overnight run, 306 assets). Qwen3-VL 32B dense: 10.9 s per photo vs 2.1 s for the 30B-A3B (24 vs 115 tok/s), with 25% longer captions and 3 more tags on average. A full-library pass would take about 394 h vs 83 h. SigLIP2 giant (1536-d): retrieval equal to so400m on this set (MRR 0.673 vs 0.675), with the same share of same-event neighbours. Keyword recall on the 32B index is lower, but the example queries are written from 30B captions, so that comparison is biased and inconclusive. Caption quality needs human judgement (ADR-0006).
 - A first hint for the ADR-0026 threshold: real matches reach about 0.10 SigLIP2 cosine, while a query for something absent tops out around 0.04.
+- Video frames (44 test videos, 30B-A3B). Default 4 fixed frames: 5.5K prompt tokens, 6.6 s per video. SigLIP2 content-change sampling (4-12, 6 on average): 6.4K tokens, 7.5 s. Dense 8-16 frames: 9.4K tokens, 11.6 s. Classic scene-cut detection finds almost nothing in home videos (one continuous take), and Ollama's Qwen3-VL gives every image at least ~1,000 tokens, so smaller frames don't save tokens.
+- MLX quantization of Qwen3-VL 8B (your own conversions): bf16 17.6 GB / 36 tok/s, 8-bit 9.9 GB / 65, 4-bit 5.8 GB / 110, 3-bit 4.8 GB / 128, 2-bit 3.7 GB / 163. Caption meaning kept vs bf16 (SigLIP2 text similarity): 0.98 / 0.85 / 0.78 / 0.19. 2-bit breaks the model.
+- Weight edits: noise up to 5% of each matrix's spread barely changes captions (0.92+); removing layer 0's MLP breaks it (0.42) while a middle or last layer barely matters (0.84-0.88); zeroing the vision projector makes it blind (0.30).
