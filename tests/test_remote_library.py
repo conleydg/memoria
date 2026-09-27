@@ -172,10 +172,31 @@ def relpaths(n):
 
 
 class TestPrefetch:
-    def test_yields_every_original_in_order(self, tmp_path):
+    def test_yields_every_original_exactly_once(self, tmp_path):
         lib, _ = make_library(tmp_path, originals(20))
-        got = [(item.relpath, item.path.read_bytes()) for item in lib.prefetch(relpaths(20))]
-        assert got == [(r, bytes([i]) * 10) for i, r in enumerate(relpaths(20))]
+        got = {item.relpath: item.path.read_bytes() for item in lib.prefetch(relpaths(20))}
+        assert got == {r: bytes([i]) * 10 for i, r in enumerate(relpaths(20))}
+
+    def test_a_slow_file_does_not_hold_up_the_ones_behind_it(self, tmp_path):
+        # The first file (a big video, say) doesn't finish until every
+        # other file has been handed to the caller.
+        lib, ssh = make_library(tmp_path, originals(6))
+        others_used = threading.Event()
+
+        def run(argv, check=False, stdout=None, **kwargs):
+            if "/0.heic" in argv[2] and not others_used.wait(timeout=5):
+                raise AssertionError("stuck behind the slow file")
+            return ssh(argv, check=check, stdout=stdout)
+
+        lib.run = run
+        order = []
+        for item in lib.prefetch(relpaths(6), workers=2):
+            assert item.error is None
+            order.append(item.relpath)
+            if len(order) == 5:
+                others_used.set()
+        assert order[-1] == "originals/0/0.heic"
+        assert sorted(order) == sorted(relpaths(6))
 
     def test_later_files_download_while_the_first_is_still_in_flight(self, tmp_path):
         # The fake blocks the first transfer until the second one has
@@ -210,9 +231,12 @@ class TestPrefetch:
         files = originals(3)
         del files[f"{LIBRARY}/originals/1/1.heic"]
         lib, _ = make_library(tmp_path, files)
-        items = list(lib.prefetch(relpaths(3)))
-        assert [i.path is not None for i in items] == [True, False, True]
-        assert isinstance(items[1].error, FileNotFoundError)
+        items = {i.relpath: i for i in lib.prefetch(relpaths(3))}
+        assert len(items) == 3
+        assert items["originals/0/0.heic"].path.exists()
+        assert items["originals/2/2.heic"].path.exists()
+        assert items["originals/1/1.heic"].path is None
+        assert isinstance(items["originals/1/1.heic"].error, FileNotFoundError)
 
     def test_files_fetched_ahead_are_never_evicted_before_use(self, tmp_path):
         # Budget fits one file, but the window holds up to eight: files
@@ -225,7 +249,6 @@ class TestPrefetch:
         lib, _ = make_library(tmp_path, originals(20), max_cache_bytes=30)
         list(lib.prefetch(relpaths(20)))
         assert lib._pinned == {}
-        lib.fetch("originals/0/0.heic")
         cached = [p for p in (tmp_path / "cache").rglob("*") if p.is_file()]
         assert sum(p.stat().st_size for p in cached) <= 30
 
@@ -235,6 +258,14 @@ class TestPrefetch:
             if i == 2:
                 break
         assert lib._pinned == {}
+
+    def test_stopping_early_brings_the_cache_back_under_budget(self, tmp_path):
+        lib, _ = make_library(tmp_path, originals(20), max_cache_bytes=30)
+        for i, item in enumerate(lib.prefetch(relpaths(20), ahead=8)):
+            if i == 2:
+                break
+        cached = [p for p in (tmp_path / "cache").rglob("*") if p.is_file()]
+        assert sum(p.stat().st_size for p in cached) <= 30
 
     def test_empty_input_yields_nothing(self, tmp_path):
         lib, ssh = make_library(tmp_path)

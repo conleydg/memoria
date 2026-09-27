@@ -26,7 +26,7 @@ Transfers are slower than inference on some files (a big video over
 Wi-Fi) and faster on others, so the batch job shouldn't fetch one file,
 index it, then fetch the next. `RemoteLibrary.prefetch` keeps a window
 of upcoming originals downloading on background threads while the
-models work on the current one. Files in that window are pinned so the
+models work on the current one, handing each over as soon as it lands. Files in that window are pinned so the
 cache's eviction never deletes a file the pipeline hasn't reached yet.
 """
 
@@ -36,9 +36,9 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
-from collections import Counter, deque
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -157,8 +157,13 @@ class RemoteLibrary:
     def prefetch(
         self, relpaths: Iterable[str], workers: int = 4, ahead: int = 16
     ) -> Iterator[Prefetched]:
-        """Yields every original in `relpaths`, in order, while up to
-        `ahead` of the next ones download on `workers` background threads.
+        """Yields every original in `relpaths` exactly once, while up to
+        `ahead` of them download on `workers` background threads.
+
+        Files come back in the order their downloads finish, not list
+        order: a large video still transferring doesn't hold up the
+        smaller files behind it, it only occupies one worker until it's
+        done. Indexing each asset is independent, so order doesn't matter.
 
         Each yielded file stays pinned until the caller asks for the next
         one, so it's safe to use for as long as the loop body runs.
@@ -167,7 +172,7 @@ class RemoteLibrary:
         Stopping early (a `break`) cancels what hasn't started and
         unpins everything this call pinned."""
         it = iter(relpaths)
-        pending = deque()
+        pending = {}  # future -> relpath
         with ThreadPoolExecutor(max_workers=workers) as pool:
 
             def top_up():
@@ -175,12 +180,16 @@ class RemoteLibrary:
                     relpath = next(it, None)
                     if relpath is None:
                         return
-                    pending.append((relpath, pool.submit(self.fetch, relpath, pin=True)))
+                    pending[pool.submit(self.fetch, relpath, pin=True)] = relpath
 
             try:
                 top_up()
                 while pending:
-                    relpath, future = pending.popleft()
+                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    # One at a time: any others already done stay in
+                    # `pending` and come straight back from the next wait.
+                    future = next(iter(done))
+                    relpath = pending.pop(future)
                     top_up()
                     try:
                         path = future.result()
@@ -192,13 +201,19 @@ class RemoteLibrary:
                     finally:
                         self.unpin(path)
             finally:
-                for _, future in pending:
+                for future in pending:
                     future.cancel()
                 # Downloads already running finish on their own; wait for
                 # them, then release their pins.
-                for _, future in pending:
+                for future in pending:
                     if not future.cancelled() and future.exception() is None:
                         self.unpin(future.result())
+                # Files pinned during the run may have pushed the cache
+                # over budget; now that they're released, bring it back
+                # under - on an early stop too.
+                with self._lock:
+                    evict_to_budget(self.cache_dir, self.max_cache_bytes, keep=set(self._pinned))
+
 
 def evict_to_budget(cache_dir: Path, max_bytes: int, keep: Iterable[Path] = ()) -> list[Path]:
     """Deletes least-recently-used cached files until the cache fits in
