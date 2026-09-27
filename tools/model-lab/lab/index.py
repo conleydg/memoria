@@ -37,7 +37,8 @@ QSCHEMA = {"type": "object", "properties": {"queries": {"type": "array", "items"
 
 def rebuild_fts(conn):
     for table, model in (("search_fts", "qwen3-vl-30b"), ("search_fts_8b", "qwen3-vl-8b"),
-                         ("search_fts_32b", "qwen3-vl-32b")):
+                         ("search_fts_32b", "qwen3-vl-32b"), ("search_fts_gemma4", "gemma4-26b"),
+                         ("search_fts_qwen38", "qwen3.8-27b")):
         conn.execute(f"DELETE FROM {table}")
         rows = conn.execute(
             "SELECT v.asset_id, v.caption, v.tags, v.ocr_text, t.text, "

@@ -19,7 +19,7 @@ document.getElementById("explain").innerHTML = explainer("a mini retrieval eval"
   eval is ADR-0006's hand-checked ground truth, which this doesn't replace.</p>
   <p><b>Name queries</b> (a person's name alone) test something only Photos' face recognition can supply. Expect vector search to fail them.</p>`);
 const pct = (x) => (x == null ? "–" : (x * 100).toFixed(0) + "%");
-const NAMES = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", "qwen3-vl-8b": "Qwen3-VL 8B" };
+const NAMES = { "gemma4-26b": "Gemma 4 26B-A4B", "qwen3.8-27b": "Qwen3.8 27B (dense)", "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", "qwen3-vl-8b": "Qwen3-VL 8B" };
 function evalTable(g) {
   const rows = Object.entries(g).sort((a, b) => b[1].mrr - a[1].mrr);
   const best = rows[0]?.[1].mrr;

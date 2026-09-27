@@ -120,6 +120,8 @@ CREATE TABLE IF NOT EXISTS example_queries (
 
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts_8b USING fts5(asset_id UNINDEXED, text);
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts_32b USING fts5(asset_id UNINDEXED, text);
+CREATE VIRTUAL TABLE IF NOT EXISTS search_fts_gemma4 USING fts5(asset_id UNINDEXED, text);
+CREATE VIRTUAL TABLE IF NOT EXISTS search_fts_qwen38 USING fts5(asset_id UNINDEXED, text);
 
 -- Embeddings from alternative (comparison) models. The production
 -- embedding lives in memoria's `embeddings` table; vectors from

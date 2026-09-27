@@ -79,15 +79,31 @@ def images_for(uuid: str, kind: str) -> list[str]:
     return [base64.b64encode(p.read_bytes()).decode() for p in paths]
 
 
+_CAPS: dict[str, list] = {}
+
+
+def capabilities(model: str) -> list:
+    if model not in _CAPS:
+        info = requests.post(f"{OLLAMA}/api/show", json={"model": model}, timeout=30).json()
+        _CAPS[model] = info.get("capabilities", [])
+    return _CAPS[model]
+
+
 def describe(model: str, uuid: str, kind: str, keep_alive="10m", retry=False) -> dict:
     prompt = PROMPT_VIDEO if kind == "video" else PROMPT_IMAGE
     images = images_for(uuid, kind)
     t0 = time.time()
-    r = requests.post(f"{OLLAMA}/api/chat", timeout=600, json={
+    req = {
         "model": model, "stream": False, "format": RETRY_SCHEMA if retry else SCHEMA,
         "options": RETRY_OPTIONS if retry else OPTIONS, "keep_alive": keep_alive,
         "messages": [{"role": "user", "content": prompt, "images": images}],
-    })
+    }
+    # Hybrid "thinking" models would otherwise reason at length before
+    # every caption; a caption doesn't need it, and it would make the
+    # speed comparison unfair. Only sent to models that support it.
+    if "thinking" in capabilities(model):
+        req["think"] = False
+    r = requests.post(f"{OLLAMA}/api/chat", timeout=600, json=req)
     r.raise_for_status()
     body = r.json()
     wall = time.time() - t0
@@ -155,7 +171,7 @@ def run(model: str, label: str, is_primary: bool, retry: bool = False):
         print(f"{label} retry: fixed {done}, still failing {failed}")
         return
     record_run(conn, label, model_version=version, role="caption + tags + OCR", runtime="Ollama (localhost)",
-               license="Apache-2.0", disk_bytes=model_size(model), load_seconds=load_seconds,
+               license=LICENSES.get(label, "Apache-2.0"), disk_bytes=model_size(model), load_seconds=load_seconds,
                peak_memory_bytes=peak.peak,
                memory_note=f"max of Ollama process RSS ({peak.peak_rss / 1e9:.1f} GB) and /api/ps size ({peak.peak_ps / 1e9:.1f} GB)",
                assets_done=done, assets_failed=failed, total_seconds=total, started_at=started,
@@ -173,8 +189,10 @@ def write_production(conn, uuid, version, o):
                      [(uuid, t, "qwen3-vl", version, now) for t in o["tags"]])
 
 
+LICENSES = {}  # all current VLMs are Apache-2.0 (checked with `ollama show`)
 LABELS = {"qwen3-vl:30b-a3b-instruct-q4_K_M": "qwen3-vl-30b", "qwen3-vl:8b-instruct-q4_K_M": "qwen3-vl-8b",
-          "qwen3-vl:32b-instruct-q4_K_M": "qwen3-vl-32b"}
+          "qwen3-vl:32b-instruct-q4_K_M": "qwen3-vl-32b",
+          "gemma4:26b-a4b-it-q4_K_M": "gemma4-26b", "qwen3.8:27b-q4_K_M": "qwen3.8-27b"}
 
 if __name__ == "__main__":
     m = sys.argv[1]

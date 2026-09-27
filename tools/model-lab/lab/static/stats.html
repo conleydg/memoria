@@ -18,9 +18,9 @@ document.getElementById("explain").innerHTML = explainer("speed, memory and the 
   writes about as fast as a 3B model while knowing more. It still needs memory for all 30B parameters.</p>
   <p><b>The projection</b> multiplies average per-asset time by your library's counts, running one model at a time. It's a rough
   first-pass estimate: no batching or parallelism, and videos are estimated from the test clips.</p>`);
-const LABEL = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-8b": "Qwen3-VL 8B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", siglip2: "SigLIP2 so400m",
+const LABEL = { "gemma4-26b": "Gemma 4 26B-A4B", "qwen3.8-27b": "Qwen3.8 27B (dense)", "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-8b": "Qwen3-VL 8B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", siglip2: "SigLIP2 so400m",
   "siglip2-giant": "SigLIP2 giant", whisper: "Whisper large-v3-turbo", "q-align": "Q-Align (OneAlign)" };
-const SWAPS = [["qwen3-vl-32b", "qwen3-vl-30b"], ["siglip2-giant", "siglip2"], ["qwen3-vl-8b", "qwen3-vl-30b"]];
+const SWAPS = [["gemma4-26b", "qwen3-vl-30b"], ["qwen3.8-27b", "qwen3-vl-30b"], ["qwen3-vl-32b", "qwen3-vl-30b"], ["siglip2-giant", "siglip2"], ["qwen3-vl-8b", "qwen3-vl-30b"]];
 api("/api/stats").then((s) => {
   const runs = s.runs.map((r) => {
     const p = s.per_asset[r.model] || {}, tk = s.tokens[r.model];

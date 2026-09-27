@@ -19,7 +19,7 @@ document.getElementById("explain").innerHTML = explainer("one asset, every model
 const id = new URLSearchParams(location.search).get("id");
 const root = document.getElementById("root");
 
-const VLM_NAMES = { "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", "qwen3-vl-8b": "Qwen3-VL 8B" };
+const VLM_NAMES = { "gemma4-26b": "Gemma 4 26B-A4B", "qwen3.8-27b": "Qwen3.8 27B (dense)", "qwen3-vl-30b": "Qwen3-VL 30B-A3B", "qwen3-vl-32b": "Qwen3-VL 32B (dense)", "qwen3-vl-8b": "Qwen3-VL 8B" };
 function vlmCol(v, others, name) {
   if (!v) return `<div class="panel"><h3>${name}</h3><p class="muted">no result</p></div>`;
   if (v.error) return `<div class="panel"><h3>${name}</h3><p class="bad">error: ${esc(v.error)}</p></div>`;
@@ -40,7 +40,7 @@ function fmtT(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floo
 async function load() {
   const a = await api(`/api/asset/${id}`);
   document.title = `Model lab · ${fmtDate(a.date)}`;
-  const vlmKeys = ["qwen3-vl-30b", "qwen3-vl-32b", "qwen3-vl-8b"].filter((k) => a.vlm[k]);
+  const vlmKeys = ["qwen3-vl-30b", "gemma4-26b", "qwen3.8-27b", "qwen3-vl-32b", "qwen3-vl-8b"].filter((k) => a.vlm[k]);
   const media = a.kind === "video"
     ? `<video id="vid" controls preload="metadata" src="/media/${id}/video.mp4" poster="/media/${id}/thumb.jpg"></video>
        <div class="frames">${[0, 1, 2, 3].map((i) => `<img src="/media/${id}/f${i}.jpg" title="keyframe ${i + 1} (sent to the VLMs and SigLIP2)">`).join("")}</div>
@@ -88,9 +88,10 @@ async function load() {
       </div>
     </div>
     <h2>Caption and tags: same prompt, ${vlmKeys.length} models</h2>
-    <p class="small muted">Tags with a green outline were produced by every model. The 30B-A3B is the production candidate. The 32B is dense
-    (all 32B parameters work on every token), so it's slower. The 8B is the small option.</p>
-    <div class="cols ${vlmKeys.length === 3 ? "three" : "two"}">${vlmKeys.map((k) => vlmCol(a.vlm[k], vlmKeys.filter((o) => o !== k).map((o) => a.vlm[o]), VLM_NAMES[k] || k)).join("")}</div>
+    <p class="small muted">Tags with a green outline were produced by every model. The 30B-A3B is the production candidate. Gemma 4 26B-A4B is
+    Google's mixture-of-experts (about 4B active per word). Qwen3.8 27B and Qwen3-VL 32B are dense (every parameter works on every word), so they're slower.
+    The 8B is the small option.</p>
+    <div class="cols ${vlmKeys.length >= 3 ? "three" : "two"}">${vlmKeys.map((k) => vlmCol(a.vlm[k], vlmKeys.filter((o) => o !== k).map((o) => a.vlm[o]), VLM_NAMES[k] || k)).join("")}</div>
     ${a.kind === "video" ? `<h2>Transcript (Whisper large-v3-turbo)</h2><div class="panel">
       ${a.has_audio ? (a.segments.length ? `<p class="small muted">Language: ${esc(a.transcript_meta?.language)} ·
         ${a.transcript_meta?.has_speech ? "speech detected" : "no confident speech. Faded segments are probably Whisper filling silence or noise with invented words, which is why they're kept out of search."}

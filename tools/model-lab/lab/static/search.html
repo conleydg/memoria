@@ -68,7 +68,8 @@ async function run(e) {
 }
 $("form").addEventListener("submit", run);
 api("/api/status").then((st) => {
-  if (st.fts_indexes.includes("32b")) $("index").insertAdjacentHTML("beforeend", `<option value="32b">32B captions</option>`);
+  const FTS_NAMES = { "32b": "32B captions", gemma4: "Gemma 4 captions", "qwen3.8": "Qwen3.8 captions" };
+  st.fts_indexes.filter((k) => FTS_NAMES[k]).forEach((k) => $("index").insertAdjacentHTML("beforeend", `<option value="${k}">${FTS_NAMES[k]}</option>`));
   st.vector_models.slice(1).forEach((m) => $("vmodel").insertAdjacentHTML("beforeend", `<option value="${m}">SigLIP2 ${esc(m.replace("siglip2-", ""))}</option>`));
   ["index", "vmodel"].forEach((id) => $(id).addEventListener("input", () => $("q").value && run()));
 }).finally(() => { if ($("q").value) run(); });

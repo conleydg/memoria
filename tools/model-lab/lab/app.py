@@ -17,6 +17,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import searchlab
 from .store import DATA, MEDIA, ROOT, connect
@@ -31,7 +32,8 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _local = threading.local()
 _siglip: dict = {}   # key -> {"model", "error", "load_seconds"}
 _vec: dict = {}
-FTS_TABLES = {"30b": "search_fts", "8b": "search_fts_8b", "32b": "search_fts_32b"}
+FTS_TABLES = {"30b": "search_fts", "8b": "search_fts_8b", "32b": "search_fts_32b",
+              "gemma4": "search_fts_gemma4", "qwen3.8": "search_fts_qwen38"}
 VECTOR_MODELS = ("siglip2", "siglip2-giant")
 
 
@@ -96,7 +98,7 @@ def embed_queries(texts: list[str], key: str = "siglip2") -> np.ndarray:
 
 # ---------- pages ----------
 
-for page in ("index", "asset", "search", "map", "stats", "compare"):
+for page in ("index", "asset", "search", "map", "stats", "compare", "ask"):
     def _page(page=page):
         return FileResponse(STATIC / f"{page}.html")
     app.add_api_route("/" if page == "index" else f"/{page}", _page, include_in_schema=False)
@@ -244,7 +246,8 @@ def compare(refresh: bool = False):
     sig = [c.execute(q).fetchone()[0] for q in (
         "SELECT count(*) FROM example_queries", "SELECT count(*) FROM embeddings",
         "SELECT count(*) FROM alt_embeddings", "SELECT count(*) FROM vlm_results WHERE error IS NULL",
-        "SELECT count(*) FROM search_fts_32b")]
+        "SELECT count(*) FROM search_fts_32b", "SELECT count(*) FROM search_fts_gemma4",
+        "SELECT count(*) FROM search_fts_qwen38")]
     cache = DATA / "compare.json"
     if cache.exists() and not refresh:
         data = json.loads(cache.read_text())
@@ -253,6 +256,23 @@ def compare(refresh: bool = False):
     data = cmp.compute(c, embed_queries, vec_index, _active_fts(), available_vector_models()) | {"sig": sig}
     cache.write_text(json.dumps(data))
     return data
+
+
+class AskRequest(BaseModel):
+    question: str
+    facts: str = ""
+    model: str = "8b"
+
+
+@app.post("/api/ask")
+def ask(req: AskRequest):
+    """POST so questions and facts (e.g. birthdays) never land in URLs or
+    server logs."""
+    from . import ask as ask_mod
+    if req.model not in ask_mod.MODELS:
+        raise HTTPException(400, "model must be 8b or 30b")
+    out = ask_mod.answer(db(), req.question, embed_query, vec_index, req.facts, req.model)
+    return out | {"assets": _briefs([i["id"] for i in out["items"]])}
 
 
 @app.get("/api/similar/{uuid}")
