@@ -83,7 +83,9 @@ async function load() {
       <span class="small muted mono" title="Whisper's probability that this segment is not speech">p(no speech) ${fmt(s.no_speech_prob, 2)}</span></div>`).join("");
   root.classList.remove("muted");
   root.innerHTML = `
-    <div class="row"><h1 style="margin-right:auto">${a.kind === "video" ? "Video" : "Photo"} · ${fmtDate(a.date)}</h1>
+    <div class="row"><h1>${a.kind === "video" ? "Video" : "Photo"} · ${fmtDate(a.date)}</h1>
+      ${a.filename ? `<span class="fname-big" data-copy="${esc(a.filename)}" title="Click to copy, then paste into the search field in Photos">${esc(a.filename)} ⧉</span>` : ""}
+      <span style="margin-right:auto"></span>
       <span class="small muted">sampled as: ${a.strata.map(esc).join(", ")}${a.dup_group ? " · near-duplicate group" : ""}</span></div>
     <div class="cols two">
       <div class="media-main">${media}

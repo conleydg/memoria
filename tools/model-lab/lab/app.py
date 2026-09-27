@@ -133,7 +133,7 @@ def media(uuid: str, name: str):
 def _asset_rows(where="1=1", params=()):
     c = db()
     return c.execute(f"""
-        SELECT a.uuid, a.kind, a.date_created, a.status, a.note, l.strata, l.dup_group, l.duration,
+        SELECT a.uuid, a.kind, a.date_created, a.status, a.note, a.original_filename, l.strata, l.dup_group, l.duration,
                l.width, l.height, l.has_audio, l.uti, l.subtype,
                q.aesthetic, json_extract(tq.detail, '$.quality') AS quality,
                (SELECT label FROM zero_shot z WHERE z.asset_id=a.uuid ORDER BY softmax DESC LIMIT 1) AS label,
@@ -148,7 +148,7 @@ def _asset_rows(where="1=1", params=()):
 
 
 def _brief(r):
-    return {"uuid": r["uuid"], "kind": r["kind"], "date": r["date_created"],
+    return {"uuid": r["uuid"], "kind": r["kind"], "date": r["date_created"], "filename": r["original_filename"],
             "year": time.gmtime(r["date_created"]).tm_year if r["date_created"] else None,
             "status": r["status"], "strata": (r["strata"] or "").split(","), "label": r["label"],
             "label_p": r["label_p"], "aesthetic": r["aesthetic"], "quality": r["quality"],

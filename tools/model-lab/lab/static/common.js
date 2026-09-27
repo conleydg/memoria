@@ -34,7 +34,8 @@ function card(a, opts = {}) {
   return `<a class="card ${opts.dim ? "dim" : ""}" href="/asset?id=${a.uuid}" title="${esc(opts.title || "")}">
     <img loading="lazy" src="/media/${a.uuid}/thumb.jpg" alt="">${vid}${score}
     <div class="meta"><span>${a.year ?? ""}</span><span>${esc(a.label ?? "")}</span>
-    <span>${a.aesthetic != null ? "★ " + fmt(a.aesthetic, 1) : ""}</span></div></a>`;
+    <span>${a.aesthetic != null ? "★ " + fmt(a.aesthetic, 1) : ""}</span></div>
+    ${a.filename ? `<div class="fname mono" title="Click to copy. Search for it in Photos." data-copy="${esc(a.filename)}">${esc(a.filename)}</div>` : ""}</a>`;
 }
 
 function explainer(title, html, open = false) {
@@ -46,3 +47,16 @@ function yearColor(y, min, max) {
   const t = max > min ? (y - min) / (max - min) : 0.5;
   return `hsl(${Math.round(260 - 220 * t)}, 70%, 50%)`;
 }
+
+// Click a filename to copy it (to paste into Photos' search), without opening the card.
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-copy]");
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  const text = el.dataset.copy, old = el.textContent;
+  const done = () => { el.textContent = "copied ✓"; setTimeout(() => (el.textContent = old), 1200); };
+  (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(done).catch(() => {
+    const t = Object.assign(document.createElement("textarea"), { value: text });
+    document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); done();
+  });
+}, true);

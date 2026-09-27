@@ -63,6 +63,13 @@ def main():
     source = sqlite3.connect(f"file:{PHOTOS_DB}?mode=ro", uri=True)
     guid_of = dict(source.execute("SELECT ZUUID, ZCLOUDASSETGUID FROM ZASSET"))
     via_guid = missing = 0
+    # The filename Photos shows (e.g. IMG_1234.HEIC), so an item can be
+    # found in Photos by searching for it. ZFILENAME is Photos' internal
+    # UUID-based name; ZORIGINALFILENAME is the one users see.
+    for uuid, name in source.execute(
+            "SELECT a.ZUUID, aa.ZORIGINALFILENAME FROM ZASSET a "
+            "JOIN ZADDITIONALASSETATTRIBUTES aa ON aa.ZASSET = a.Z_PK WHERE aa.ZORIGINALFILENAME IS NOT NULL"):
+        conn.execute("UPDATE assets SET original_filename=? WHERE uuid=?", (name, uuid))
     now = time.time()
     people_rows = located = 0
     for uuid in ids:

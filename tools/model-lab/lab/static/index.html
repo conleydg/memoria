@@ -5,6 +5,7 @@
 <h1>Test set gallery</h1>
 <div id="explain"></div>
 <div class="filters panel">
+  <label>Filename <input id="f-name" type="search" placeholder="IMG_1234" style="width:110px"></label>
   <label>Type <select id="f-kind"><option value="">all</option><option>image</option><option>video</option></select></label>
   <label>Year <select id="f-year"><option value="">all</option></select></label>
   <label>Zero-shot label <select id="f-label"><option value="">all</option></select></label>
@@ -26,14 +27,17 @@ document.getElementById("explain").innerHTML = explainer("the gallery", `
   those categories. It compares the image's vector with the vector of a sentence like "a screenshot of a phone or computer
   screen" and picks the closest (ADR-0010). <b>Aesthetic</b> is Q-Align's 1–5 score (Q-Align is a separate model).</p>
   <p><b>Person</b> doesn't come from any of these models. It comes from Photos' own face recognition, copied from the Photos database
-  (ADR-0015/0023). None of our models know who your family are. Only people you've named in Photos can be filtered or searched.</p>`);
+  (ADR-0015/0023). None of our models know who your family are. Only people you've named in Photos can be filtered or searched.</p>
+  <p><b>Filename</b> under each card is the name Photos shows (e.g. IMG_1234.HEIC). Click it to copy, then paste it into Photos' search to find
+  the same item there. Camera counters repeat over the years, so check the date too.</p>`);
 let all = [];
 const $ = (id) => document.getElementById(id);
 function fill(sel, values) { values.forEach((v) => sel.insertAdjacentHTML("beforeend", `<option>${esc(v)}</option>`)); }
 function render() {
   const kind = $("f-kind").value, year = $("f-year").value, label = $("f-label").value, st = $("f-stratum").value, pe = $("f-person").value;
   const q = parseFloat($("f-q").value); $("f-qv").textContent = q.toFixed(2);
-  let xs = all.filter((a) => (!kind || a.kind === kind) && (!year || String(a.year) === year) &&
+  const fn = $("f-name").value.trim().toLowerCase();
+  let xs = all.filter((a) => (!fn || (a.filename || "").toLowerCase().includes(fn)) && (!kind || a.kind === kind) && (!year || String(a.year) === year) &&
     (!label || a.label === label) && (!st || a.strata.includes(st)) &&
     (!pe || (pe === "__named" ? a.people.length > 0 : pe === "__faces" ? a.faces > 0 : a.people.includes(pe))) && (q <= 1 || (a.aesthetic ?? 0) >= q));
   const s = $("f-sort").value;
@@ -47,7 +51,7 @@ api("/api/assets").then((xs) => {
   fill($("f-label"), [...new Set(all.map((a) => a.label).filter(Boolean))].sort());
   fill($("f-person"), [...new Set(all.flatMap((a) => a.people))].sort());
   fill($("f-stratum"), [...new Set(all.flatMap((a) => a.strata))].sort());
-  ["f-kind", "f-year", "f-label", "f-person", "f-stratum", "f-q", "f-sort"].forEach((id) => $(id).addEventListener("input", render));
+  ["f-name", "f-kind", "f-year", "f-label", "f-person", "f-stratum", "f-q", "f-sort"].forEach((id) => $(id).addEventListener("input", render));
   render();
 });
 </script></body></html>

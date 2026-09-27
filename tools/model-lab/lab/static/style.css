@@ -80,3 +80,7 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); f
 .seg { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
 .seg .t { font-family: var(--mono); font-size: 12px; color: var(--accent); cursor: pointer; white-space: nowrap; }
 .seg.nospeech { opacity: .45; }
+.fname { font-size: 11px; color: var(--muted); padding: 0 8px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: copy; }
+.fname:hover { color: var(--accent); }
+.fname-big { font-family: var(--mono); font-size: 14px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 7px; cursor: copy; background: var(--panel); }
+.fname-big:hover { border-color: var(--accent); }
