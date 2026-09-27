@@ -35,6 +35,31 @@ function vlmCol(v, others, name) {
   </div>`;
 }
 
+const STRATS = [
+  ["fixed4", "qwen3-vl-30b", "Default: 4 fixed frames", "At 10/35/60/85% of the clip, 1024 px. Used by every model in this lab (captions, SigLIP2, Q-Align)."],
+  ["change", "qwen3-vl-30b@change", "Content changes (SigLIP2)", "A candidate every second, embedded with SigLIP2; the frames that look most different from each other are kept (4-12, 768 px). Plain cut detection found nothing, since home videos are one continuous take."],
+  ["dense", "qwen3-vl-30b@dense", "More, smaller frames", "About one every 5 s (8-16 frames), 512 px. Similar total tokens to 4 big frames: more moments, less detail each."],
+];
+function framesSection(a) {
+  const have = STRATS.filter(([k]) => a.frames?.[k]?.length);
+  if (!have.length) return "";
+  const rows = have.map(([k, model, title, desc]) => {
+    const v = a.vlm[model];
+    const strip = a.frames[k].map((f) => `<figure style="margin:0;text-align:center"><img src="/media/${a.uuid}/frames/${k}/${f.file}"
+        data-t="${f.t}" class="seekframe" style="height:${k === "dense" ? 64 : 84}px;border-radius:5px;cursor:pointer" title="${f.t.toFixed(1)} s · click to jump there">
+        <figcaption class="small muted mono">${fmtT(f.t)}</figcaption></figure>`).join("");
+    return `<div class="panel" style="margin-bottom:12px"><h3>${esc(title)} <span class="small muted">· ${a.frames[k].length} frames · ${esc(desc)}</span></h3>
+      <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px">${strip}</div>
+      ${v && !v.error ? `<p style="margin:8px 0 4px">${esc(v.caption)}</p>
+        <div class="tags">${v.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+        <p class="small muted">Qwen3-VL 30B-A3B · ${v.prompt_tokens} prompt tokens · ${fmt(v.seconds, 1)} s
+        <details style="display:inline"><summary class="small">prompt</summary><pre>${esc(v.prompt)}</pre></details></p>`
+        : `<p class="small muted">${v?.error ? "error: " + esc(v.error) : "Not captioned with this strategy."}</p>`}</div>`;
+  }).join("");
+  return `<h2>What the models saw <span class="small muted">(frame-selection experiment)</span></h2>
+    <p class="small muted">A vision model reads still images, not video. Each strip is one way of choosing which frames to send. The caption under
+    it is what the 30B-A3B wrote from exactly those frames. The speech track is handled separately by Whisper, which hears the whole thing.</p>${rows}`;
+}
 function fmtT(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`; }
 
 async function load() {
@@ -43,8 +68,7 @@ async function load() {
   const vlmKeys = ["qwen3-vl-30b", "gemma4-26b", "qwen3.8-27b", "qwen3-vl-32b", "qwen3-vl-8b"].filter((k) => a.vlm[k]);
   const media = a.kind === "video"
     ? `<video id="vid" controls preload="metadata" src="/media/${id}/video.mp4" poster="/media/${id}/thumb.jpg"></video>
-       <div class="frames">${[0, 1, 2, 3].map((i) => `<img src="/media/${id}/f${i}.jpg" title="keyframe ${i + 1} (sent to the VLMs and SigLIP2)">`).join("")}</div>
-       <p class="small muted">The 4 keyframes above are what the vision models actually saw.</p>`
+       <p class="small muted">The vision models don't watch the video. See "What the models saw" below.</p>`
     : `<img src="/media/${id}/full.jpg" alt="">`;
   const zs = a.zero_shot.map((z) => `<tr><td>${esc(z.label)}<div class="small muted">"${esc(z.prompt)}"</div></td>
       <td class="num mono">${fmt(z.logit, 2)}</td><td class="num mono">${fmt(z.prob, 3)}</td>
@@ -92,6 +116,7 @@ async function load() {
     Google's mixture-of-experts (about 4B active per word). Qwen3.8 27B and Qwen3-VL 32B are dense (every parameter works on every word), so they're slower.
     The 8B is the small option.</p>
     <div class="cols ${vlmKeys.length >= 3 ? "three" : "two"}">${vlmKeys.map((k) => vlmCol(a.vlm[k], vlmKeys.filter((o) => o !== k).map((o) => a.vlm[o]), VLM_NAMES[k] || k)).join("")}</div>
+    ${a.kind === "video" ? framesSection(a) : ""}
     ${a.kind === "video" ? `<h2>Transcript (Whisper large-v3-turbo)</h2><div class="panel">
       ${a.has_audio ? (a.segments.length ? `<p class="small muted">Language: ${esc(a.transcript_meta?.language)} ·
         ${a.transcript_meta?.has_speech ? "speech detected" : "no confident speech. Faded segments are probably Whisper filling silence or noise with invented words, which is why they're kept out of search."}
@@ -101,6 +126,9 @@ async function load() {
     <h2>More like this <span class="small muted">(nearest SigLIP2 vectors)</span>
       <select id="sim-model" class="small" style="margin-left:10px"><option value="siglip2">so400m (production)</option></select></h2>
     <div id="simnote"></div><div id="similar" class="grid"></div>`;
+  document.querySelectorAll(".seekframe").forEach((el) => el.addEventListener("click", () => {
+    const v = document.getElementById("vid"); v.currentTime = parseFloat(el.dataset.t); v.scrollIntoView({ block: "center" }); v.pause();
+  }));
   document.querySelectorAll(".seg .t").forEach((el) => el.addEventListener("click", () => {
     const v = document.getElementById("vid"); v.currentTime = parseFloat(el.dataset.t); v.play();
   }));

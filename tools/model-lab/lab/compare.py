@@ -64,7 +64,9 @@ def retrieval_eval(conn, embed_queries, vec_index, fts_tables: dict, vector_mode
 
 
 def caption_stats(conn):
-    models = [r[0] for r in conn.execute("SELECT DISTINCT model FROM vlm_results ORDER BY model")]
+    # "model@strategy" rows are frame-selection experiments on videos only;
+    # they're compared on the asset pages, not here.
+    models = [r[0] for r in conn.execute("SELECT DISTINCT model FROM vlm_results WHERE model NOT LIKE '%@%' ORDER BY model")]
     stats = {}
     tags = {}
     for m in models:

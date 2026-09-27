@@ -89,13 +89,16 @@ def capabilities(model: str) -> list:
     return _CAPS[model]
 
 
-def describe(model: str, uuid: str, kind: str, keep_alive="10m", retry=False) -> dict:
-    prompt = PROMPT_VIDEO if kind == "video" else PROMPT_IMAGE
-    images = images_for(uuid, kind)
+def describe(model: str, uuid: str, kind: str, keep_alive="10m", retry=False,
+             images: list[str] | None = None, prompt: str | None = None, options: dict | None = None) -> dict:
+    """images/prompt override the default frames and prompt (used by
+    lab.frames to compare frame-selection strategies)."""
+    prompt = prompt or (PROMPT_VIDEO if kind == "video" else PROMPT_IMAGE)
+    images = images if images is not None else images_for(uuid, kind)
     t0 = time.time()
     req = {
         "model": model, "stream": False, "format": RETRY_SCHEMA if retry else SCHEMA,
-        "options": RETRY_OPTIONS if retry else OPTIONS, "keep_alive": keep_alive,
+        "options": options or (RETRY_OPTIONS if retry else OPTIONS), "keep_alive": keep_alive,
         "messages": [{"role": "user", "content": prompt, "images": images}],
     }
     # Hybrid "thinking" models would otherwise reason at length before

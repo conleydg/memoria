@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model lab · MLX hands-on</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<h1>MLX hands-on: open the model up</h1>
+<div id="explain"></div>
+<div id="root" class="muted">Loading…</div>
+</main>
+<script src="/static/common.js"></script>
+<script>
+header("/mlx");
+document.getElementById("explain").innerHTML = explainer("what this section is", `
+  <p>Everywhere else in the lab, Ollama runs the caption models for us: you ask, it answers, and the model is a black box. Here, Qwen3-VL 8B is loaded
+  <b>directly</b> with Apple's MLX library (via <code>mlx-vlm</code>), at full bf16 precision, so we can look at and change what's inside.</p>
+  <p>Four short exercises, each a script you can run and tweak yourself from a terminal in <code>~/memoria</code>. The command is under each heading.
+  Results appear here after a run. Each has its full source below it: it's short and commented, and reading it is half the point.</p>
+  <p><b>Similarity scores</b> compare what two captions <i>mean</i>, using SigLIP2's text encoder (1.0 = same meaning, ~0.5 = unrelated), so you can
+  see changes at a glance without reading every caption. The captions themselves are there too.</p>`);
+const pctf = (x) => (x * 100).toFixed(x < 0.01 ? 2 : 1) + "%";
+const gb = (b) => (b / 1e9).toFixed(1) + " GB";
+function simBar(x) {
+  const w = Math.max(0, Math.min(1, (x - 0.4) / 0.6)) * 100;  // 0.4..1.0 mapped onto the bar
+  const col = x > 0.9 ? "var(--good)" : x > 0.75 ? "var(--warn)" : "var(--bad)";
+  return `<div class="bar" title="${x.toFixed(3)}"><span style="width:${w}%;background:${col}"></span></div><span class="small mono">${x.toFixed(3)}</span>`;
+}
+function thumbs(images) {
+  return images.map((im) => `<a href="/asset?id=${im.uuid}"><img src="/media/${im.uuid}/thumb.jpg" style="width:64px;height:64px;object-fit:cover;border-radius:6px" title="${esc(im.stratum)}"></a>`).join(" ");
+}
+function histSVG(h, stats) {
+  const W = 640, H = 160, max = Math.max(...h.counts), n = h.counts.length, bw = W / n;
+  const bars = h.counts.map((c, i) => `<rect x="${i * bw}" y="${H - (c / max) * H}" width="${bw - 1}" height="${(c / max) * H}" fill="var(--accent)"/>`).join("");
+  const x0 = h.edges[0], x1 = h.edges[h.edges.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H + 18}" style="width:100%;max-width:${W}px">${bars}
+    <text x="0" y="${H + 14}" font-size="11" fill="currentColor">${x0.toFixed(3)}</text>
+    <text x="${W}" y="${H + 14}" font-size="11" fill="currentColor" text-anchor="end">${x1.toFixed(3)}</text>
+    <text x="${W / 2}" y="${H + 14}" font-size="11" fill="currentColor" text-anchor="middle">0</text></svg>`;
+}
+function groupSVG(g) {
+  const W = 640, H = 150, n = g.original.length, all = g.original.concat(g.reconstructed);
+  const lo = Math.min(...all), hi = Math.max(...all), y = (v) => H - ((v - lo) / (hi - lo || 1)) * H, x = (i) => (i + 0.5) * (W / n);
+  const levels = Array.from({ length: g.levels }, (_, q) => g.bias + g.scale * q)
+    .map((v) => `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`).join("");
+  const dots = g.original.map((v, i) => `<line x1="${x(i)}" x2="${x(i)}" y1="${y(v)}" y2="${y(g.reconstructed[i])}" stroke="var(--bad)" stroke-width="1"/>
+    <circle cx="${x(i)}" cy="${y(v)}" r="3" fill="var(--accent)"/><circle cx="${x(i)}" cy="${y(g.reconstructed[i])}" r="2.5" fill="none" stroke="var(--warn)"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px">${levels}${dots}</svg>`;
+}
+const R = {
+  "01_load_and_inspect": (d) => {
+    const g = d.params.groups, tot = d.params.total;
+    const rows = Object.entries(g).map(([k, x]) => `<tr><td>${esc(k)}</td><td class="num">${(x.stored_values / 1e9).toFixed(2)} B</td>
+      <td class="num">${pctf(x.stored_values / tot.stored_values)}</td><td class="num">${gb(x.bytes)}</td><td class="small mono">${esc(Object.keys(x.dtypes).join(", "))}</td></tr>`).join("");
+    const a = d.architecture;
+    return `<div class="cols two"><div>
+      <p><b>${(tot.stored_values / 1e9).toFixed(2)} billion</b> parameters, ${gb(tot.bytes)} in memory (bf16 = 2 bytes each), ${gb(d.disk_bytes)} on disk.
+      Loaded in ${d.load_seconds.toFixed(1)} s.</p>
+      <table><tr><th>component</th><th class="num">parameters</th><th class="num">share</th><th class="num">memory</th><th>dtype</th></tr>${rows}</table>
+      <h3>Architecture (from config.json)</h3>
+      <p class="small">Language model: <b>${a.text.num_hidden_layers}</b> decoder layers, width ${a.text.hidden_size}, feed-forward ${a.text.intermediate_size},
+      ${a.text.num_attention_heads} attention heads (${a.text.num_key_value_heads} key/value heads), vocabulary ${a.text.vocab_size?.toLocaleString()} tokens.<br>
+      Vision encoder: ${a.vision.depth} layers, width ${a.vision.hidden_size}, ${a.vision.patch_size}-pixel patches, merged ${a.vision.spatial_merge_size}×${a.vision.spatial_merge_size}
+      into one image token.</p>
+      <p class="small">Speed at bf16: <b>${d.mean_gen_tps.toFixed(0)} tokens/s</b>, ${d.mean_seconds.toFixed(1)} s per photo. The same model through Ollama at 4-bit ran
+      ~83 tok/s. Fewer bits = fewer bytes to move per token, and moving bytes is what limits speed on a Mac.</p>
+      </div><div><h3>The module tree</h3><pre style="max-height:420px">${esc(d.tree.join("\n"))}</pre></div></div>
+      <details><summary>Captions from this run</summary>${d.runs.map((r) => `<p class="small"><a href="/asset?id=${r.uuid}"><img src="/media/${r.uuid}/thumb.jpg" style="width:48px;height:48px;object-fit:cover;border-radius:5px;vertical-align:middle"></a>
+        ${esc(r.text)} <span class="muted">(${r.seconds.toFixed(1)} s)</span></p>`).join("")}</details>`;
+  },
+  "02_quantize": (d) => {
+    const vs = d.variants, res = d.results;
+    const rows = vs.map((v) => { const x = res[v]; return `<tr><td><b>${v}</b></td><td class="num">${gb(x.disk_bytes)}</td><td class="num">${gb(x.active_memory_bytes)}</td>
+      <td class="num">${x.mean_gen_tps.toFixed(0)}</td><td class="num">${x.mean_seconds.toFixed(1)} s</td><td class="num">${x.load_seconds.toFixed(1)} s</td>
+      <td class="num">${x.convert_seconds ? x.convert_seconds.toFixed(0) + " s" : "–"}</td><td style="width:22%">${simBar(x.mean_similarity)}</td></tr>`; }).join("");
+    const caps = d.images.map((im, i) => `<tr><td><a href="/asset?id=${im.uuid}"><img src="/media/${im.uuid}/thumb.jpg" style="width:72px;height:72px;object-fit:cover;border-radius:6px"></a></td>
+      ${vs.map((v) => `<td class="small">${esc(res[v].captions[i])}<div class="muted mono">${res[v].similarity_to_bf16[i].toFixed(3)}</div></td>`).join("")}</tr>`).join("");
+    return `<table><tr><th>precision</th><th class="num">disk</th><th class="num">memory</th><th class="num">tok/s</th><th class="num">per photo</th><th class="num">load</th>
+      <th class="num">quantize time</th><th>meaning kept vs bf16</th></tr>${rows}</table>
+      <p class="small muted">Group size ${d.group_size}: each group of ${d.group_size} weights shares one scale and one offset.</p>
+      <h3>Same photos, every precision</h3><div style="overflow-x:auto"><table><tr><th></th>${vs.map((v) => `<th>${v}</th>`).join("")}</tr>${caps}</table></div>`;
+  },
+  "03_weights_up_close": (d) => {
+    const s = d.stats, g = d.group;
+    const err = d.errors.map((e) => `<tr><td>${e.bits}-bit</td><td class="num">${e.bits_per_weight.toFixed(2)}</td><td class="num">${pctf(e.relative_error)}</td>
+      <td class="num mono">${e.mean_abs_error.toExponential(2)}</td><td class="num mono">${e.max_abs_error.toExponential(2)}</td></tr>`).join("");
+    const where = Object.entries(d.where).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="num">${(n / 1e9).toFixed(2)} B</td><td style="width:40%"><div class="bar"><span style="width:${(n / d.total_params * 100).toFixed(1)}%"></span></div></td><td class="num">${pctf(n / d.total_params)}</td></tr>`).join("");
+    return `<p>Matrix <code>${esc(d.key)}</code>: shape ${s.shape.join(" × ")} = ${s.values.toLocaleString()} numbers (${esc(s.dtype)}).</p>
+      <div class="cols two"><div><h3>Distribution of its values</h3>${histSVG(d.hist, s)}
+        <p class="small">Mean ${s.mean.toExponential(1)}, standard deviation ${s.std.toExponential(2)}. The biggest value is <b>${s.largest_over_std.toFixed(0)}×</b> the typical size, and
+        ${pctf(s.share_beyond_4std)} of values are beyond 4 standard deviations. A handful of outliers carry a lot of meaning, and they stretch the range each quantization group has to cover.</p></div>
+      <div><h3>One group of ${d.group_size} weights at 4 bits</h3>${groupSVG(g)}
+        <p class="small">Blue dots: original values. Orange circles: what 4-bit keeps. Grey lines: the only ${g.levels} values this group can take
+        (offset ${g.bias.toExponential(2)} + scale ${g.scale.toExponential(2)} × 0…15). Red: rounding error. This is the group containing the matrix's
+        largest outlier: the outlier forces a wide range, so every small weight in the group gets rounded coarsely.</p></div></div>
+      <h3>Rounding error for the whole matrix</h3>
+      <table><tr><th>bits</th><th class="num">bits/weight incl. scale+offset</th><th class="num">relative error</th><th class="num">mean abs error</th><th class="num">max abs error</th></tr>${err}</table>
+      <h3>Where the ${(d.total_params / 1e9).toFixed(2)} billion parameters live</h3><table>${where}</table>`;
+  },
+  "04_change_the_weights": (d) => {
+    const ex = d.experiments;
+    const rows = ex.map((e) => `<tr><td><b>${esc(e.label)}</b><div class="small muted">${esc(e.detail)}</div></td><td style="width:22%">${simBar(e.mean_similarity)}</td>
+      ${e.captions.map((c, i) => `<td class="small">${esc(c)}<div class="muted mono">${e.similarity[i].toFixed(3)}</div></td>`).join("")}</tr>`).join("");
+    return `<p class="small">Photos: ${thumbs(d.images)} · the language model has ${d.n_layers} decoder layers.</p>
+      <div style="overflow-x:auto"><table><tr><th>edit</th><th>meaning kept</th>${d.images.map((im, i) => `<th>photo ${i + 1}</th>`).join("")}</tr>${rows}</table></div>`;
+  },
+};
+api("/api/mlx").then((xs) => {
+  document.getElementById("root").classList.remove("muted");
+  document.getElementById("root").innerHTML = xs.map((x, i) => {
+    const [title, ...rest] = x.doc.split("\n");
+    const intro = rest.join("\n").split(/\n\s*\n/).slice(1).map((p) => `<p class="small">${esc(p.trim()).replace(/\n/g, " ")}</p>`).join("");
+    return `<h2>${esc(title)}</h2><div class="panel">
+      <p class="mono small" style="background:var(--bg);padding:6px 8px;border-radius:6px">${esc(x.command)}</p>
+      ${intro}
+      ${x.result ? `<h3>Last run <span class="small muted">${new Date(x.result.saved_at * 1000).toLocaleString()}</span></h3>${R[x.script](x.result)}`
+        : `<p class="muted">Not run yet. Paste the command above into a terminal in ~/memoria.</p>`}
+      <details style="margin-top:10px"><summary class="small">Source: ${esc(x.script)}.py</summary><pre style="max-height:500px">${esc(x.source)}</pre></details>
+    </div>`;
+  }).join("") + `<h2>Next steps, if you want to go further</h2><div class="panel small">
+    <p><b>Fine-tuning (LoRA).</b> Instead of random nudges, train a small set of extra weights, a "low-rank adapter" of a few million numbers, on
+    examples of what you want. mlx-vlm has a LoRA trainer. A personal idea: teach the 8B your family's names from photos Photos has already labelled,
+    so captions can say who's there. All local.</p>
+    <p><b>Try the exercises with different settings:</b> <code>--group-size 32</code> in exercise 2 (smaller groups = more accurate, a bit bigger),
+    a different <code>--layer</code> or <code>--matrix self_attn.v_proj</code> in 3, or your own noise levels in 4.</p></div>`;
+}).catch((e) => (document.getElementById("root").textContent = "Error: " + e.message));
+</script></body></html>

@@ -1,6 +1,6 @@
 // Shared helpers for the model lab pages. No external libraries.
 
-const PAGES = [["/", "Gallery"], ["/ask", "Ask"], ["/search", "Search playground"], ["/map", "Embedding map"], ["/compare", "Compare models"], ["/stats", "Model stats"]];
+const PAGES = [["/", "Gallery"], ["/ask", "Ask"], ["/search", "Search playground"], ["/map", "Embedding map"], ["/compare", "Compare models"], ["/stats", "Model stats"], ["/mlx", "MLX hands-on"]];
 
 function header(active) {
   const nav = PAGES.map(([href, name]) => `<a href="${href}" class="${href === active ? "on" : ""}">${name}</a>`).join("");

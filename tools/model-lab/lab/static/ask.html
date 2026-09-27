@@ -7,7 +7,12 @@
 <form id="form" class="panel">
   <div class="row">
     <input id="q" type="text" placeholder="e.g. When did we last go to the beach?  ·  What did [name] do in 2023?" style="flex:1;min-width:300px" autofocus>
-    <label class="small muted">Model <select id="model"><option value="8b">Qwen3-VL 8B (fast)</option><option value="30b">Qwen3-VL 30B-A3B</option></select></label>
+    <span class="small muted">Model</span>
+    <span id="model-toggle" style="display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden">
+      <button type="button" data-m="8b" class="primary" style="border:0;border-radius:0">8B · fast</button>
+      <button type="button" data-m="30b" style="border:0;border-radius:0">30B-A3B</button>
+    </span>
+    <input type="hidden" id="model" value="8b">
     <button class="primary" id="go">Ask</button>
   </div>
   <details style="margin-top:10px"><summary class="small">Facts the model can use (e.g. birthdays). Kept in this browser only.</summary>
@@ -34,6 +39,10 @@ document.getElementById("explain").innerHTML = explainer("retrieval-augmented ge
   while indexing. This page only searches the ~300 test items, not the whole library yet.</p>`);
 const $ = (id) => document.getElementById(id);
 try { $("facts").value = localStorage.getItem("lab-facts") || ""; } catch (e) {}
+document.querySelectorAll("#model-toggle button").forEach((btn) => btn.addEventListener("click", () => {
+  $("model").value = btn.dataset.m;
+  document.querySelectorAll("#model-toggle button").forEach((b) => b.classList.toggle("primary", b === btn));
+}));
 $("facts").addEventListener("input", () => { try { localStorage.setItem("lab-facts", $("facts").value); } catch (e) {} });
 
 function renderAnswer(text, n2id) {

@@ -98,10 +98,24 @@ def embed_queries(texts: list[str], key: str = "siglip2") -> np.ndarray:
 
 # ---------- pages ----------
 
-for page in ("index", "asset", "search", "map", "stats", "compare", "ask"):
+for page in ("index", "asset", "search", "map", "stats", "compare", "ask", "mlx"):
     def _page(page=page):
         return FileResponse(STATIC / f"{page}.html")
     app.add_api_route("/" if page == "index" else f"/{page}", _page, include_in_schema=False)
+
+
+FRAME_DIRS = {"fixed4": "frames", "change": "frames_change", "dense": "frames_dense"}
+
+
+@app.get("/media/{uuid}/frames/{strategy}/{name}")
+def frame(uuid: str, strategy: str, name: str):
+    if strategy not in FRAME_DIRS or not all(c in "0123456789ABCDEFabcdef-" for c in uuid) \
+            or not (name.startswith("f") and name.endswith(".jpg") and name[1:-4].isdigit()):
+        raise HTTPException(404)
+    p = MEDIA / uuid / FRAME_DIRS[strategy] / name
+    if not p.exists():
+        raise HTTPException(404)
+    return FileResponse(p)
 
 
 @app.get("/media/{uuid}/{name}")
@@ -186,6 +200,13 @@ def asset(uuid: str):
     emb = c.execute("SELECT model_version FROM embeddings WHERE asset_id=?", (uuid,)).fetchone()
     out["embedding_model"] = emb[0] if emb else None
     out["queries"] = [q["query"] for q in c.execute("SELECT query FROM example_queries WHERE asset_id=? ORDER BY idx", (uuid,))]
+    frames = {}
+    if c.execute("SELECT name FROM sqlite_master WHERE name='video_frames'").fetchone():
+        for fr in c.execute("SELECT strategy, idx, t, px FROM video_frames WHERE asset_id=? ORDER BY strategy, idx", (uuid,)):
+            files = sorted(p.name for p in (MEDIA / uuid / FRAME_DIRS[fr["strategy"]]).glob("f*.jpg"))
+            if fr["idx"] < len(files):
+                frames.setdefault(fr["strategy"], []).append({"t": fr["t"], "px": fr["px"], "file": files[fr["idx"]]})
+    out["frames"] = frames
     return out
 
 
@@ -273,6 +294,27 @@ def ask(req: AskRequest):
         raise HTTPException(400, "model must be 8b or 30b")
     out = ask_mod.answer(db(), req.question, embed_query, vec_index, req.facts, req.model)
     return out | {"assets": _briefs([i["id"] for i in out["items"]])}
+
+
+MLX_DIR = ROOT / "tools" / "model-lab" / "mlx_handson"
+MLX_EXERCISES = [("01_load_and_inspect", "01_inspect"), ("02_quantize", "02_quantize"),
+                 ("03_weights_up_close", "03_weights"), ("04_change_the_weights", "04_change")]
+
+
+@app.get("/api/mlx")
+def mlx_results():
+    out = []
+    for script, result in MLX_EXERCISES:
+        src = (MLX_DIR / f"{script}.py").read_text()
+        res = DATA / "mlx" / "results" / f"{result}.json"
+        data = json.loads(res.read_text()) if res.exists() else None
+        if data:
+            for key in ("images",):
+                if key in data:
+                    data[key] = [{k: v for k, v in im.items() if k != "path"} for im in data[key]]
+        out.append({"script": script, "command": f".venv/bin/python tools/model-lab/mlx_handson/{script}.py",
+                    "doc": src.split('"""')[1].strip(), "source": src, "result": data})
+    return out
 
 
 @app.get("/api/similar/{uuid}")
