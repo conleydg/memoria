@@ -13,8 +13,9 @@ tools/model-lab/start.sh     # http://127.0.0.1:8765
 Pages:
 - **Gallery**, filterable by type, year, zero-shot label, sample stratum and aesthetic score.
 - **Asset detail**: 30B vs 8B captions, tags and OCR side by side (raw prompt and response included), SigLIP2 zero-shot scores, the timestamped Whisper transcript, Q-Align scores, and per-model timings. Also *How could this be found?* (example queries, with this asset's keyword, vector and hybrid rank and the RRF math) and *More like this*.
-- **Search playground**: keyword, vector and hybrid results side by side, with a min-similarity slider (ADR-0026) and a switch between the 30B and 8B keyword index.
+- **Search playground**: keyword, vector and hybrid results side by side, with a min-similarity slider (ADR-0026) and switches for the keyword index (30B, 8B or 32B captions) and the vector model (SigLIP2 so400m or giant).
 - **Embedding map**: UMAP or PCA of the SigLIP2 vectors, colored by label, year, type or aesthetic score.
+- **Compare models**: an automatic retrieval eval (Recall@k and MRR for every keyword index, vector model and hybrid pair) plus caption stats per VLM.
 - **Model stats**: load time, latency, tok/s, peak memory, and the projected full-library first pass.
 
 ## Re-run the pipeline
@@ -43,4 +44,5 @@ tools/model-lab/.venv-qalign/bin/pip install "transformers==4.36.1" torch "accel
 - Q-Align's peak memory (about 23 GB with fp16 on MPS) is higher than the 30B's (about 19 GB).
 - Similarity works when there's something similar to find. 75% of an event photo's top-5 neighbours are from the same event, and the median nearest-neighbour cosine is 0.98 for event items vs 0.78 for random-sample items.
 - Names come only from Photos (ADR-0015). On name-only queries, keyword search puts the tagged photo in the top 10 far more often than vector search does, because SigLIP2 has never seen these people.
+- Larger models (overnight run, 306 assets). Qwen3-VL 32B dense: 10.9 s per photo vs 2.1 s for the 30B-A3B (24 vs 115 tok/s), with 25% longer captions and 3 more tags on average. A full-library pass would take about 394 h vs 83 h. SigLIP2 giant (1536-d): retrieval equal to so400m on this set (MRR 0.673 vs 0.675), with the same share of same-event neighbours. Keyword recall on the 32B index is lower, but the example queries are written from 30B captions, so that comparison is biased and inconclusive. Caption quality needs human judgement (ADR-0006).
 - A first hint for the ADR-0026 threshold: real matches reach about 0.10 SigLIP2 cosine, while a query for something absent tops out around 0.04.
