@@ -137,7 +137,7 @@ def run(model: str, label: str, is_primary: bool, retry: bool = False):
     done = failed = 0
     load_seconds = None
     started = time.time()
-    with OllamaPeak() as peak:
+    with OllamaPeak(model=model) as peak:
         for i, r in enumerate(rows):
             try:
                 o = describe(model, r["uuid"], r["kind"], retry=retry)
